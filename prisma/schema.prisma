@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  name          String?
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts            Account[]
+  sessions           Session[]
+  substackSources    SubstackSource[]
+  youtubeConnection  YoutubeConnection?
+  feedItems          FeedItem[]
+  settings           UserSettings?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  refresh_token_expires_in Int?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model SubstackSource {
+  id                String   @id @default(cuid())
+  userId            String
+  rssUrl            String?  @db.Text  // Optional - keep for backwards compatibility
+  publicationName   String
+  subscriptionEmail String?  @unique   // Generated email address
+  emailProvider     String?             // 'resend', 'mailgun', etc.
+  emailProviderId   String?             // Provider-specific ID
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastSyncedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, rssUrl])
+  @@index([userId])
+}
+
+model YoutubeConnection {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  accessToken   String?  @db.Text
+  refreshToken  String?  @db.Text
+  expiresAt     DateTime?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FeedItem {
+  id            String   @id @default(cuid())
+  userId        String
+  source        String   // "substack" | "youtube"
+  sourceId      String   // Unique ID from source (postId, videoId, etc.)
+  title         String
+  author        String?  // Channel name, publication name, or author
+  publishedAt   DateTime
+  excerpt       String?  @db.Text
+  url           String   @db.Text
+  thumbnail     String?  @db.Text
+  durationSeconds Int?
+  rawPayload    Json?    // Store raw data for debugging
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, source, sourceId])
+  @@index([userId, publishedAt])
+  @@index([userId, source])
+}
+
+model UserSettings {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  hideYoutubeShorts  Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
