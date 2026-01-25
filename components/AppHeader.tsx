@@ -9,7 +9,7 @@ export default function AppHeader() {
       className="sticky top-0 z-50 border-b border-gray-200 bg-[#F5F5F5]/80 backdrop-blur-sm"
     >
       <div className="w-full px-4 py-2 flex items-center justify-between">
-        <Link href="/" className="text-lg font-mono text-black">
+        <Link href="/" className="text-lg font-mono text-black no-underline">
           clear-feed
         </Link>
         <Link

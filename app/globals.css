@@ -21,6 +21,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 * {
   box-sizing: border-box;
   padding: 0;

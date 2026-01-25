@@ -26,6 +26,7 @@ interface FeedItemProps {
   item: {
     id: string
     source: 'substack' | 'youtube'
+    sourceId?: string
     title: string
     author: string | null
     publishedAt: string
@@ -47,6 +48,7 @@ export default function FeedItem({
   const isYoutube = item.source === 'youtube'
   const emailPreview = !isYoutube ? item.emailText || item.excerpt : item.excerpt
   const metaGrayClass = 'text-gray-400'
+  const youtubeIconClass = greyscaleThumbnails ? metaGrayClass : 'text-red-500'
   const showThumbnail = !hideThumbnails && (item.thumbnail || !isYoutube)
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -187,9 +189,9 @@ export default function FeedItem({
       <div className={`flex items-start ${showThumbnail ? 'gap-4' : ''}`}>
         {showThumbnail && (
           <div
-            className={`flex-shrink-0 w-32 h-24 bg-gray-100 overflow-hidden rounded-[8px] flex items-center justify-center ${
-              greyscaleThumbnails ? 'grayscale' : ''
-            }`}
+            className={`flex-shrink-0 w-32 h-24 overflow-hidden rounded-[8px] flex items-center justify-center ${
+              item.thumbnail ? 'bg-gray-100' : greyscaleThumbnails ? 'bg-gray-100' : 'bg-[#FFF7CC]'
+            } ${greyscaleThumbnails ? 'grayscale' : ''}`}
           >
             {item.thumbnail ? (
               <img
@@ -210,8 +212,22 @@ export default function FeedItem({
                 xmlns="http://www.w3.org/2000/svg"
                 aria-hidden="true"
               >
-                <rect x="3" y="5" width="18" height="14" rx="2" stroke="#9CA3AF" strokeWidth="1.5" />
-                <path d="M3 7l9 6 9-6" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <rect
+                  x="3"
+                  y="5"
+                  width="18"
+                  height="14"
+                  rx="2"
+                  stroke={greyscaleThumbnails ? '#9CA3AF' : '#FFCE73'}
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M3 7l9 6 9-6"
+                  stroke={greyscaleThumbnails ? '#9CA3AF' : '#FFCE73'}
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             )}
           </div>
@@ -219,7 +235,7 @@ export default function FeedItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             {isYoutube ? (
-              <span className={`inline-flex items-center ${metaGrayClass}`}>
+              <span className={`inline-flex items-center ${youtubeIconClass}`}>
                 <svg
                   width="22"
                   height="16"
@@ -233,7 +249,11 @@ export default function FeedItem({
                 </svg>
               </span>
             ) : (
-              <span className={`inline-flex items-center ${metaGrayClass}`}>
+              <span
+                className={`inline-flex items-center ${
+                  greyscaleThumbnails ? metaGrayClass : 'text-[#FFCE73]'
+                }`}
+              >
                 <svg
                   width="18"
                   height="18"
@@ -269,14 +289,17 @@ export default function FeedItem({
       <div className="relative" data-feed-item-id={item.id}>
         {menu}
         {confirmDialog}
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block"
+        <Link
+          href={`/youtube/${item.id}`}
+          className="block no-underline"
+          onClick={() => {
+            sessionStorage.setItem('feedScrollOverride', '1')
+            sessionStorage.setItem('feedScrollY', String(window.scrollY))
+            sessionStorage.setItem('feedRestoreKey', item.id)
+          }}
         >
           {content}
-        </a>
+        </Link>
       </div>
     )
   }
@@ -297,7 +320,7 @@ export default function FeedItem({
       {confirmDialog}
       <Link
         href={`/email/${item.id}`}
-        className="block"
+        className="block no-underline"
         onClick={() => {
           sessionStorage.setItem('feedScrollOverride', '1')
           sessionStorage.setItem('feedScrollY', String(window.scrollY))

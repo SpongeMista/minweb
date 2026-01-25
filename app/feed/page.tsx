@@ -2,6 +2,7 @@
 
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { formatDistanceToNow } from 'date-fns'
 import FeedItem from '@/components/FeedItem'
 import {
   readHideThumbnailsPreference,
@@ -66,6 +67,8 @@ export default function FeedPage() {
   const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
   const hasScrolledRef = useRef(false)
   const lastScrollYRef = useRef(0)
+  const [syncInFlight, setSyncInFlight] = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
 
   const {
     data,
@@ -73,6 +76,7 @@ export default function FeedPage() {
     hasNextPage,
     isFetchingNextPage,
     refetch,
+    isFetching,
   } = useInfiniteQuery({
     queryKey: ['feed'],
     queryFn: ({ pageParam }) =>
@@ -99,6 +103,21 @@ export default function FeedPage() {
       refetch()
       sessionStorage.removeItem('settingsChangeStamp')
     }
+  }, [])
+
+  const isSyncing = syncInFlight || isFetching || isFetchingNextPage
+
+  useEffect(() => {
+    const loadStatus = async () => {
+      try {
+        const status = await fetchSyncStatus()
+        setLastSyncedAt(status?.lastSyncedAt ? new Date(status.lastSyncedAt) : null)
+      } catch (error) {
+        console.error('Sync status error:', error)
+      }
+    }
+
+    void loadStatus()
   }, [])
 
   useEffect(() => {
@@ -241,7 +260,10 @@ export default function FeedPage() {
           !lastSyncedAt || Date.now() - lastSyncedAt.getTime() > SYNC_THRESHOLD_MS
 
         if (shouldSync && isActive) {
+          setSyncInFlight(true)
           await syncFeeds()
+          const nextStatus = await fetchSyncStatus()
+          setLastSyncedAt(nextStatus?.lastSyncedAt ? new Date(nextStatus.lastSyncedAt) : null)
           if (isActive) {
             queryClient.invalidateQueries({ queryKey: ['feed'] })
             refetch()
@@ -249,6 +271,10 @@ export default function FeedPage() {
         }
       } catch (error) {
         console.error('Sync status error:', error)
+      } finally {
+        if (isActive) {
+          setSyncInFlight(false)
+        }
       }
     }
 
@@ -292,6 +318,20 @@ export default function FeedPage() {
               </button>
             </div>
           )}
+          <div className="text-xs text-gray-400 flex items-center justify-center gap-2">
+            {isSyncing ? (
+              <>
+                <span className="inline-flex h-3 w-3 rounded-full border border-gray-400 border-t-transparent animate-spin" />
+                <span>Syncing…</span>
+              </>
+            ) : (
+              <span>
+                {lastSyncedAt
+                  ? `Last synced ${formatDistanceToNow(lastSyncedAt, { addSuffix: true })}`
+                  : 'Last synced never'}
+              </span>
+            )}
+          </div>
         </div>
       </main>
     </div>
