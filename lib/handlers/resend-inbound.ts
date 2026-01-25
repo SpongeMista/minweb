@@ -13,6 +13,49 @@ function safeDomain(email: string) {
   return at >= 0 ? email.slice(at + 1) : 'unknown'
 }
 
+async function fetchReceivedEmailContent(emailIds: string[]) {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY is not configured')
+  }
+
+  const idsToTry = emailIds.filter(Boolean).slice(0, 2)
+
+  for (const id of idsToTry) {
+    const endpoint = `https://api.resend.com/emails/receiving/${id}`
+    const method = 'GET'
+    const response = await fetch(endpoint, {
+      method,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      let errorBody = ''
+      try {
+        errorBody = await response.text()
+      } catch {
+        errorBody = ''
+      }
+      if (response.status === 404) {
+        continue
+      }
+      throw new Error(`Resend received email fetch failed: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return {
+      html: data?.html || null,
+      text: data?.text || null,
+      headers: data?.headers || null,
+    }
+  }
+
+  throw new Error('Resend received email fetch failed: no matching id')
+}
+
 export async function handleResendInbound(request: NextRequest) {
   try {
     const emailService = getEmailService()
@@ -28,7 +71,6 @@ export async function handleResendInbound(request: NextRequest) {
     if (!body) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
-
     if (verificationEnabled) {
       if (!signature && !svixSignature) {
         return NextResponse.json({ error: 'Missing signature' }, { status: 401 })
@@ -40,7 +82,14 @@ export async function handleResendInbound(request: NextRequest) {
 
     const emailData = body.data?.record || body.data || body
     const eventType = body.type || body.event || 'unknown'
-    const messageId = emailData?.id || emailData?.message_id || null
+    const messageId = emailData?.message_id || null
+    const emailId = emailData?.email_id || null
+    const rawId = emailData?.id || null
+    const dataId = body?.data?.id || null
+    const dataEmailId = body?.data?.email_id || null
+    const recordId = body?.data?.record?.id || null
+    const recordEmailId = body?.data?.record?.email_id || null
+    const nestedEmailId = emailData?.email?.id || body?.data?.email?.id || null
     const toEmail = Array.isArray(emailData.to)
       ? emailData.to[0]
       : (emailData.to || emailData.recipient || '')
@@ -55,6 +104,8 @@ export async function handleResendInbound(request: NextRequest) {
     }
 
     let parsedEmail
+    let emailHtml: string | null = null
+    let emailText: string | null = null
     if (typeof rawEmail === 'string') {
       parsedEmail = await parseEmail(Buffer.from(rawEmail))
     } else if (emailData.html || emailData.text || emailData.text_plain) {
@@ -91,6 +142,26 @@ export async function handleResendInbound(request: NextRequest) {
       }
     }
 
+    const candidateIds = [
+      emailId,
+      rawId,
+      dataId,
+      dataEmailId,
+      recordId,
+      recordEmailId,
+      nestedEmailId,
+    ].filter((id, index, array) => id && array.indexOf(id) === index) as string[]
+    if (candidateIds.length > 0) {
+      try {
+        const received = await fetchReceivedEmailContent(candidateIds)
+        emailHtml = received.html
+        emailText = received.text
+      } catch (error) {
+        console.error('Failed to fetch received email content:', error)
+      }
+    } else {
+    }
+
     const feedItem = emailToFeedItem(parsedEmail, source.publicationName)
     const userId = await getDefaultUserId()
 
@@ -107,6 +178,8 @@ export async function handleResendInbound(request: NextRequest) {
         author: feedItem.author,
         publishedAt: feedItem.publishedAt,
         excerpt: feedItem.excerpt,
+        emailHtml,
+        emailText,
         url: feedItem.url,
         thumbnail: feedItem.thumbnail,
         rawPayload: feedItem.rawPayload as any,
@@ -120,15 +193,13 @@ export async function handleResendInbound(request: NextRequest) {
         author: feedItem.author,
         publishedAt: feedItem.publishedAt,
         excerpt: feedItem.excerpt,
+        emailHtml,
+        emailText,
         url: feedItem.url,
         thumbnail: feedItem.thumbnail,
         rawPayload: feedItem.rawPayload as any,
       },
     })
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/handlers/resend-inbound.ts:104',message:'Feed item upserted',data:{sourceId:feedItem.sourceId,userId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
 
     await prisma.substackSource.update({
       where: { id: source.id },

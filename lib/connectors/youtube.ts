@@ -90,9 +90,8 @@ export class YouTubeConnector extends BaseConnector {
       
       console.log(`Found ${subscriptions.length} YouTube subscriptions`)
 
-      // Limit to first 10 channels to avoid quota issues and reduce errors
-      const channelsToProcess = subscriptions.slice(0, 10)
-      console.log(`Processing ${channelsToProcess.length} channels (out of ${subscriptions.length} total)`)
+      const channelsToProcess = subscriptions
+      console.log(`Processing ${channelsToProcess.length} channels`)
       
       // Get recent uploads from subscribed channels
       const allItems: FeedItem[] = []

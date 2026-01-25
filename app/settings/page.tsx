@@ -1,8 +1,14 @@
 'use client'
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { signIn } from 'next-auth/react'
+import {
+  readHideThumbnailsPreference,
+  writeHideThumbnailsPreference,
+} from '@/lib/use-hide-thumbnails'
 
 async function fetchYouTubeStatus() {
   const res = await fetch('/api/youtube/status')
@@ -16,7 +22,12 @@ async function fetchSettings() {
   return res.json()
 }
 
-async function updateSettings(data: { hideYoutubeShorts: boolean }) {
+async function updateSettings(data: {
+  hideYoutubeShorts?: boolean
+  shortsMinSeconds?: number
+  hideThumbnails?: boolean
+  greyscaleThumbnails?: boolean
+}) {
   const res = await fetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -50,11 +61,20 @@ async function fetchEmailAddress() {
 }
 
 export default function SettingsPage() {
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [hideYoutubeShorts, setHideYoutubeShorts] = useState(false)
+  const [shortsMinSeconds, setShortsMinSeconds] = useState(60)
+  const [viewThumbnails, setViewThumbnails] = useState(true)
+  const [greyscaleThumbnails, setGreyscaleThumbnails] = useState(false)
   const [isEmailCopied, setIsEmailCopied] = useState(false)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { data: youtubeStatus, refetch: refetchYouTubeStatus } = useQuery({
+  const {
+    data: youtubeStatus,
+    refetch: refetchYouTubeStatus,
+    isLoading: isYoutubeLoading,
+  } = useQuery({
     queryKey: ['youtube-status'],
     queryFn: fetchYouTubeStatus,
   })
@@ -62,16 +82,41 @@ export default function SettingsPage() {
   const { data: settingsData } = useQuery({
     queryKey: ['settings'],
     queryFn: fetchSettings,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   useEffect(() => {
     if (settingsData?.hideYoutubeShorts !== undefined) {
       setHideYoutubeShorts(settingsData.hideYoutubeShorts)
     }
+    if (settingsData?.shortsMinSeconds !== undefined) {
+      setShortsMinSeconds(settingsData.shortsMinSeconds)
+    }
+    if (settingsData?.hideThumbnails !== undefined) {
+      setViewThumbnails(!settingsData.hideThumbnails)
+      writeHideThumbnailsPreference(settingsData.hideThumbnails)
+    }
+    if (settingsData?.greyscaleThumbnails !== undefined) {
+      setGreyscaleThumbnails(settingsData.greyscaleThumbnails)
+    }
   }, [settingsData])
+
+  useEffect(() => {
+    const stored = readHideThumbnailsPreference()
+    if (stored !== null) {
+      setViewThumbnails(!stored)
+    }
+  }, [])
 
   const updateSettingsMutation = useMutation({
     mutationFn: updateSettings,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['settings'], (prev: any) => ({
+        ...(prev ?? {}),
+        ...(data ?? {}),
+      }))
+    },
   })
 
   const { data: emailData, error: emailError, isLoading: isEmailLoading } = useQuery({
@@ -117,6 +162,11 @@ export default function SettingsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
+
+
   return (
     <div className="min-h-screen bg-[#F5F5F5]">
       <main className="max-w-[648px] mx-auto px-4 py-8">
@@ -125,6 +175,26 @@ export default function SettingsPage() {
             href="/"
             aria-label="Back to Feed"
             className="text-gray-600 hover:text-black transition-colors"
+            onClick={(event) => {
+              event.preventDefault()
+              const changeStamp = Date.now()
+              sessionStorage.setItem('settingsChangeStamp', String(changeStamp))
+              const storedHideThumbnails = readHideThumbnailsPreference()
+              const nextHideThumbnails =
+                storedHideThumbnails !== null ? storedHideThumbnails : !viewThumbnails
+              writeHideThumbnailsPreference(nextHideThumbnails)
+              updateSettingsMutation.mutate(
+                {
+                  hideYoutubeShorts,
+                  shortsMinSeconds,
+                  hideThumbnails: nextHideThumbnails,
+                  greyscaleThumbnails,
+                },
+                {
+                  onSettled: () => router.push('/'),
+                }
+              )
+            }}
           >
             <svg
               width="18"
@@ -148,10 +218,10 @@ export default function SettingsPage() {
         <div className="space-y-4">
           {/* YouTube Connection */}
           <section>
-            <div className="bg-white rounded-[26px] p-5">
+            <div className="bg-white rounded-[8px] p-5">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">YouTube</h2>
-                {youtubeStatus?.connected && (
+                {youtubeStatus?.connected ? (
                   <button
                     onClick={async () => {
                       try {
@@ -169,13 +239,40 @@ export default function SettingsPage() {
                   >
                     {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
                   </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => signIn('google', { callbackUrl: '/settings' })}
+                    className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm"
+                  >
+                    Connect with Google
+                  </button>
                 )}
               </div>
-              {youtubeStatus?.connected ? (
+              {isYoutubeLoading && !youtubeStatus ? (
                 <>
-                  <p className="text-sm text-gray-600 mb-2">
-                    Connected to YouTube
-                  </p>
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                  <div className="h-3 w-32 bg-gray-100 rounded" />
+                </>
+              ) : youtubeStatus?.connected ? (
+                <>
+                  <div className="text-sm text-gray-600 mb-2">
+                    <p>
+                      Connected to{' '}
+                      {youtubeStatus.channelName
+                        ? `${youtubeStatus.channelName}'s`
+                        : 'your'}{' '}
+                      YouTube subscriptions.
+                    </p>
+                    <a
+                      href="https://www.youtube.com/feed/channels"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-block text-gray-900 hover:underline"
+                    >
+                      Manage subscriptions
+                    </a>
+                  </div>
                   {youtubeStatus.lastSyncedAt && (
                     <p className="text-xs text-gray-500">
                       Last synced: {new Date(youtubeStatus.lastSyncedAt).toLocaleString()}
@@ -187,34 +284,122 @@ export default function SettingsPage() {
                   <p className="text-sm text-gray-600 mb-4">
                     Connect your YouTube account to sync subscriptions
                   </p>
-                  <a
-                    href="/api/auth/signin/google?callbackUrl=/settings"
-                    className="inline-block px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    Connect with Google
-                  </a>
                 </>
               )}
 
-              <div className="my-4 h-px bg-gray-200" />
+              {youtubeStatus?.connected && (
+                <>
+                  <div className="my-4 h-px bg-gray-200" />
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Hide YouTube Shorts</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextValue = !hideYoutubeShorts
+                        setHideYoutubeShorts(nextValue)
+                        updateSettingsMutation.mutate({
+                          hideYoutubeShorts: nextValue,
+                          shortsMinSeconds,
+                        })
+                      }}
+                      disabled={isYoutubeLoading}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        hideYoutubeShorts ? 'bg-black' : 'bg-gray-300'
+                      }`}
+                      aria-pressed={hideYoutubeShorts}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                          hideYoutubeShorts ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="mt-3 text-sm text-gray-600 flex items-center gap-2">
+                    <span>Hide videos under</span>
+                    <select
+                      value={Math.max(1, Math.min(3, Math.round(shortsMinSeconds / 60)))}
+                      onChange={(event) => {
+                        const nextMinutes = Number(event.target.value)
+                        if (!Number.isNaN(nextMinutes)) {
+                          const nextSeconds = nextMinutes * 60
+                          setShortsMinSeconds(nextSeconds)
+                          if (hideYoutubeShorts) {
+                            updateSettingsMutation.mutate({ shortsMinSeconds: nextSeconds })
+                          }
+                        }
+                      }}
+                      disabled={!hideYoutubeShorts}
+                      className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 disabled:opacity-50"
+                    >
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                    </select>
+                    <span>minutes.</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
 
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Hide YouTube Shorts</span>
+          {/* Feed */}
+          <section>
+            <div className="bg-white rounded-[8px] p-5">
+              <h2 className="text-lg font-semibold mb-4">Feed</h2>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">View thumbnails</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    View thumbnails for all content on the feed.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
-                    const nextValue = !hideYoutubeShorts
-                    setHideYoutubeShorts(nextValue)
-                    updateSettingsMutation.mutate({ hideYoutubeShorts: nextValue })
+                    const nextViewThumbnails = !viewThumbnails
+                    const nextHideThumbnails = !nextViewThumbnails
+                    setViewThumbnails(nextViewThumbnails)
+                    writeHideThumbnailsPreference(nextHideThumbnails)
+                    updateSettingsMutation.mutate({ hideThumbnails: nextHideThumbnails })
                   }}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    hideYoutubeShorts ? 'bg-black' : 'bg-gray-300'
+                    viewThumbnails ? 'bg-black' : 'bg-gray-300'
                   }`}
-                  aria-pressed={hideYoutubeShorts}
+                  aria-label="View thumbnails"
+                  aria-pressed={viewThumbnails}
                 >
                   <span
                     className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      hideYoutubeShorts ? 'translate-x-5' : 'translate-x-1'
+                      viewThumbnails ? 'translate-x-5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="mt-4 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">Greyscale thumbnails</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Turn thumbnails black and white to reduce distraction and excessive dopamine.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextValue = !greyscaleThumbnails
+                    setGreyscaleThumbnails(nextValue)
+                    updateSettingsMutation.mutate({ greyscaleThumbnails: nextValue })
+                  }}
+                  disabled={!viewThumbnails}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    greyscaleThumbnails ? 'bg-black' : 'bg-gray-300'
+                  } ${viewThumbnails ? '' : 'cursor-not-allowed opacity-50'}`}
+                  aria-label="Greyscale thumbnails"
+                  aria-pressed={greyscaleThumbnails}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                      greyscaleThumbnails ? 'translate-x-5' : 'translate-x-1'
                     }`}
                   />
                 </button>
@@ -224,7 +409,7 @@ export default function SettingsPage() {
 
           {/* Email Newsletters */}
           <section>
-            <div className="bg-white rounded-[26px] p-5">
+            <div className="bg-white rounded-[8px] p-5">
               <h2 className="text-lg font-semibold mb-4">Email Newsletters</h2>
               <p className="text-sm text-gray-600 mb-4">
                 Use this email that we have generated to subscribe to newsletters that you want to show up in your feed.

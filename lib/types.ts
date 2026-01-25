@@ -8,6 +8,8 @@ export interface FeedItem {
   author: string | null
   publishedAt: Date
   excerpt: string | null
+  emailHtml?: string | null
+  emailText?: string | null
   url: string
   thumbnail: string | null
   durationSeconds?: number | null
@@ -22,6 +24,8 @@ export const FeedItemSchema = z.object({
   author: z.string().nullable(),
   publishedAt: z.date(),
   excerpt: z.string().nullable(),
+  emailHtml: z.string().nullable().optional(),
+  emailText: z.string().nullable().optional(),
   url: z.string().url(),
   thumbnail: z.string().url().nullable(),
   durationSeconds: z.number().int().min(0).nullable().optional(),
@@ -39,6 +43,7 @@ export interface PaginationParams {
   limit?: number
   source?: 'substack' | 'youtube'
   hideYoutubeShorts?: boolean
+  shortsMinSeconds?: number
 }
 
 export interface PaginatedResponse<T> {

@@ -85,7 +85,7 @@ export function emailToFeedItem(
     source: 'substack',
     sourceId,
     title: parsedEmail.subject,
-    author: publicationName,
+    author: parsedEmail.fromName || parsedEmail.from || publicationName,
     publishedAt: parsedEmail.date,
     excerpt,
     url,

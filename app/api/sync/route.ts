@@ -14,7 +14,6 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}))
     const { source } = BodySchema.parse(body)
-
     const results: { source: string; count: number; error?: string }[] = []
 
     if (!source || source === 'substack' || source === 'all') {
@@ -43,7 +42,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body', details: error.errors }, { status: 400 })
     }
     console.error('Sync API error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error', detail: String(error) }, { status: 500 })
   }
 }
 

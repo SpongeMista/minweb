@@ -1,9 +1,14 @@
 'use client'
 
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import FeedItem from '@/components/FeedItem'
-import Link from 'next/link'
+import {
+  readHideThumbnailsPreference,
+  readHideThumbnailsPreferenceSync,
+  useHideThumbnailsPreference,
+  writeHideThumbnailsPreference,
+} from '@/lib/use-hide-thumbnails'
 
 async function fetchFeed(params: {
   cursor?: string
@@ -15,7 +20,29 @@ async function fetchFeed(params: {
 
   const res = await fetch(`/api/feed?${queryParams}`)
   if (!res.ok) throw new Error('Failed to fetch feed')
-  return res.json()
+  const data = await res.json()
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'app/feed/page.tsx:21',
+      message: 'feed:clientResponse',
+      data: {
+        itemCount: data?.items?.length ?? null,
+        hasMore: data?.hasMore ?? null,
+        hasNextCursor: !!data?.nextCursor,
+        hideThumbnails: data?.hideThumbnails ?? null,
+        greyscaleThumbnails: data?.greyscaleThumbnails ?? null,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'feed-empty-1',
+      hypothesisId: 'H1',
+    }),
+  }).catch(() => {})
+  // #endregion
+  return data
 }
 
 async function syncFeeds() {
@@ -28,8 +55,17 @@ async function syncFeeds() {
   return res.json()
 }
 
+async function fetchSyncStatus() {
+  const res = await fetch('/api/sync/status')
+  if (!res.ok) throw new Error('Failed to fetch sync status')
+  return res.json()
+}
+
 export default function FeedPage() {
   const queryClient = useQueryClient()
+  const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
+  const hasScrolledRef = useRef(false)
+  const lastScrollYRef = useRef(0)
 
   const {
     data,
@@ -49,47 +85,182 @@ export default function FeedPage() {
   })
 
   const items = data?.pages.flatMap((page) => page.items) || []
+  const serverHideThumbnails = data?.pages[0]?.hideThumbnails ?? false
+  const serverGreyscaleThumbnails = data?.pages[0]?.greyscaleThumbnails ?? false
+  const initialHideThumbnails = readHideThumbnailsPreferenceSync()
+  const [localHideThumbnails, setLocalHideThumbnails] =
+    useHideThumbnailsPreference(initialHideThumbnails)
+  const effectiveHideThumbnails = localHideThumbnails ?? serverHideThumbnails
 
-  // Auto-sync on page load
   useEffect(() => {
-    syncFeeds()
-      .then(() => {
-        queryClient.invalidateQueries({ queryKey: ['feed'] })
-        refetch()
+    const changeStamp = sessionStorage.getItem('settingsChangeStamp')
+    if (changeStamp) {
+      queryClient.invalidateQueries({ queryKey: ['feed'] })
+      refetch()
+      sessionStorage.removeItem('settingsChangeStamp')
+    }
+  }, [])
+
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'app/feed/page.tsx:82',
+        message: 'feed:clientState',
+        data: {
+          itemsCount: items.length,
+          pagesCount: data?.pages?.length ?? null,
+          serverHideThumbnails,
+          serverGreyscaleThumbnails,
+          localHideThumbnails,
+          effectiveHideThumbnails,
+        },
+        timestamp: Date.now(),
+        sessionId: 'debug-session',
+        runId: 'feed-empty-1',
+        hypothesisId: 'H1',
+      }),
+    }).catch(() => {})
+    // #endregion
+  }, [
+    data?.pages?.length,
+    items.length,
+    serverHideThumbnails,
+    serverGreyscaleThumbnails,
+    localHideThumbnails,
+    effectiveHideThumbnails,
+  ])
+
+  useEffect(() => {
+  }, [])
+
+  useEffect(() => {
+    if (localHideThumbnails === null && serverHideThumbnails !== null) {
+      const stored = readHideThumbnailsPreference()
+      if (stored !== null) {
+        setLocalHideThumbnails(stored)
+        return
+      }
+      setLocalHideThumbnails(serverHideThumbnails)
+    }
+  }, [localHideThumbnails, serverHideThumbnails, setLocalHideThumbnails])
+
+  useEffect(() => {
+    if (localHideThumbnails === null && serverHideThumbnails !== null) {
+      const stored = readHideThumbnailsPreference()
+      if (stored === null) {
+        writeHideThumbnailsPreference(serverHideThumbnails)
+      }
+    }
+  }, [localHideThumbnails, serverHideThumbnails])
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem('feedScrollY')
+    const override = sessionStorage.getItem('feedScrollOverride')
+    const restoreKey = sessionStorage.getItem('feedRestoreKey')
+    const scrollRestoration = history.scrollRestoration
+    history.scrollRestoration = 'manual'
+    void scrollRestoration
+    if (saved) {
+      const parsed = Number(saved)
+      if (!Number.isNaN(parsed)) {
+        setPendingScrollY(parsed)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (pendingScrollY !== null && items.length > 0) {
+      const restoreKey = sessionStorage.getItem('feedRestoreKey')
+      requestAnimationFrame(() => {
+        if (restoreKey && Number.isFinite(pendingScrollY)) {
+          window.scrollTo(0, pendingScrollY)
+        } else if (restoreKey) {
+          const target = document.querySelector<HTMLElement>(
+            `[data-feed-item-id="${restoreKey}"]`
+          )
+          const header = document.querySelector<HTMLElement>('[data-app-header]')
+          const headerHeight = header?.offsetHeight ?? null
+          if (target) {
+            target.scrollIntoView({ block: 'start' })
+            requestAnimationFrame(() => {
+              const offset = headerHeight ? -headerHeight - 8 : 0
+              if (offset) {
+                window.scrollBy(0, offset)
+              }
+            })
+          } else {
+            window.scrollTo(0, pendingScrollY)
+          }
+        } else {
+          window.scrollTo(0, pendingScrollY)
+        }
       })
-      .catch((error) => {
-        console.error('Sync error:', error)
-      })
+      sessionStorage.removeItem('feedScrollY')
+      sessionStorage.removeItem('feedScrollOverride')
+      sessionStorage.removeItem('feedRestoreKey')
+      setPendingScrollY(null)
+    }
+  }, [pendingScrollY, items.length])
+
+  useEffect(() => {
+    const handleScroll = () => {
+      lastScrollYRef.current = window.scrollY
+      hasScrolledRef.current = true
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      const override = sessionStorage.getItem('feedScrollOverride')
+      if (override === '1') {
+      } else if (hasScrolledRef.current) {
+        sessionStorage.setItem('feedScrollY', String(lastScrollYRef.current))
+      } else {
+      }
+    }
+  }, [])
+
+  // Auto-sync on page load if stale
+  useEffect(() => {
+    const SYNC_THRESHOLD_MS = 5 * 60 * 1000
+    let isActive = true
+
+    const maybeSync = async () => {
+      try {
+        const status = await fetchSyncStatus()
+        const lastSyncedAt = status?.lastSyncedAt ? new Date(status.lastSyncedAt) : null
+        const shouldSync =
+          !lastSyncedAt || Date.now() - lastSyncedAt.getTime() > SYNC_THRESHOLD_MS
+
+        if (shouldSync && isActive) {
+          await syncFeeds()
+          if (isActive) {
+            queryClient.invalidateQueries({ queryKey: ['feed'] })
+            refetch()
+          }
+        }
+      } catch (error) {
+        console.error('Sync status error:', error)
+      }
+    }
+
+    void maybeSync()
+    return () => {
+      isActive = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
     <div className="min-h-screen bg-[#F5F5F5]">
-      <header className="border-b border-gray-200">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-light text-black">Minimal Web</h1>
-          <Link
-            href="/settings"
-            aria-label="Settings"
-            className="text-gray-600 hover:text-black transition-colors"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <path
-                d="M19.4 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.03 7.03 0 0 0-1.63-.94l-.38-2.65a.5.5 0 0 0-.5-.42h-4a.5.5 0 0 0-.5.42l-.38 2.65c-.58.23-1.12.54-1.63.94l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.31-.06.63-.06.94s.02.63.06.94L2.12 14.6a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .6.22l2.49-1c.5.4 1.05.71 1.63.94l.38 2.65a.5.5 0 0 0 .5.42h4a.5.5 0 0 0 .5-.42l.38-2.65c.58-.23 1.12-.54 1.63-.94l2.49 1a.5.5 0 0 0 .6-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.66ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
-                fill="currentColor"
-              />
-            </svg>
-          </Link>
-        </div>
-      </header>
-
       <main className="max-w-[648px] mx-auto px-4 py-8">
         <div className="space-y-4">
           {items.length === 0 && !isFetchingNextPage && (
@@ -102,7 +273,12 @@ export default function FeedPage() {
           )}
 
           {items.map((item: any) => (
-            <FeedItem key={item.id} item={item} />
+            <FeedItem
+              key={item.id}
+              item={item}
+              hideThumbnails={effectiveHideThumbnails}
+              greyscaleThumbnails={serverGreyscaleThumbnails}
+            />
           ))}
 
           {hasNextPage && (
