@@ -26,6 +26,38 @@ export async function getFeed(
     }
   }
 
+  if (params.youtubeChannelIds && params.youtubeChannelIds.length > 0) {
+    const channelFilters = params.youtubeChannelIds.map((channelId) => ({
+      source: 'youtube',
+      rawPayload: {
+        path: ['snippet', 'channelId'],
+        equals: channelId,
+      },
+    }))
+    const channelScope = {
+      OR: [{ source: 'substack' }, ...channelFilters],
+    }
+    where.AND = where.AND ? [...where.AND, channelScope] : [channelScope]
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'lib/feed.ts:40',
+        message: 'feed:channelFilterApplied',
+        data: {
+          channelIds: params.youtubeChannelIds,
+          hasCursor: !!params.cursor,
+        },
+        timestamp: Date.now(),
+        sessionId: 'debug-session',
+        runId: 'feed-load-more',
+        hypothesisId: 'H2',
+      }),
+    }).catch(() => {})
+    // #endregion
+  }
+
   // Build cursor pagination conditions
   const cursorConditions: any[] = []
   if (params.cursor) {
@@ -68,31 +100,9 @@ export async function getFeed(
 
   // Add cursor pagination conditions
   if (cursorConditions.length > 0) {
-    where.AND = [{ OR: cursorConditions }]
+    const cursorScope = { OR: cursorConditions }
+    where.AND = where.AND ? [...where.AND, cursorScope] : [cursorScope]
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'lib/feed.ts:74',
-      message: 'feed:queryParams',
-      data: {
-        limit,
-        hasSource: !!params.source,
-        source: params.source ?? null,
-        hideYoutubeShorts: !!params.hideYoutubeShorts,
-        shortsMinSeconds: params.shortsMinSeconds ?? null,
-        hasCursor: !!params.cursor,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'feed-empty-1',
-      hypothesisId: 'H2',
-    }),
-  }).catch(() => {})
-  // #endregion
 
   const items = await prisma.feedItem.findMany({
     where,
@@ -103,28 +113,61 @@ export async function getFeed(
     take: limit + 1, // Fetch one extra to check if there's more
   })
 
-  const hasMore = items.length > limit
-  const resultItems = hasMore ? items.slice(0, limit) : items
-
+  const youtubeSamples = items
+    .filter((item) => item.source === 'youtube')
+    .slice(0, 5)
+    .map((item) => ({
+      id: item.id,
+      sourceId: item.sourceId,
+      channelId:
+        typeof item.rawPayload === 'object' && item.rawPayload !== null
+          ? (item.rawPayload as any)?.snippet?.channelId ?? null
+          : null,
+    }))
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       location: 'lib/feed.ts:92',
-      message: 'feed:queryResult',
+      message: 'feed:pageSample',
       data: {
-        itemCount: items.length,
-        resultCount: resultItems.length,
-        hasMore,
+        total: items.length,
+        youtubeSamples,
       },
       timestamp: Date.now(),
       sessionId: 'debug-session',
-      runId: 'feed-empty-1',
+      runId: 'feed-load-more',
       hypothesisId: 'H3',
     }),
   }).catch(() => {})
   // #endregion
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'lib/feed.ts:84',
+      message: 'feed:itemsSample',
+      data: {
+        total: items.length,
+        sample: items.slice(0, 5).map((item) => ({
+          id: item.id,
+          source: item.source,
+          sourceId: item.sourceId,
+        })),
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'feed-channel-filter',
+      hypothesisId: 'H2',
+    }),
+  }).catch(() => {})
+  // #endregion
+
+  const hasMore = items.length > limit
+  const resultItems = hasMore ? items.slice(0, limit) : items
 
   // Generate next cursor from last item
   let nextCursor: string | null = null

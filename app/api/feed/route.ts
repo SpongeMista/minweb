@@ -20,54 +20,23 @@ export async function GET(request: NextRequest) {
       limit: searchParams.get('limit') || undefined,
     })
 
-    const [account, settings] = await Promise.all([
-      prisma.account.findFirst({
-        where: {
-          userId,
-          provider: 'google',
-        },
-      }),
+    const [settings, channelCount, userChannels] = await Promise.all([
       prisma.userSettings.findUnique({
         where: { userId },
       }),
+      prisma.userYoutubeChannel.count({ where: { userId } }),
+      prisma.userYoutubeChannel.findMany({
+        where: { userId },
+        select: { channelId: true },
+      }),
     ])
 
-    const youtubeConnected = !!account?.access_token
+    const youtubeConnected = channelCount > 0
     const hideYoutubeShorts = settings?.hideYoutubeShorts ?? false
     const shortsMinSeconds = settings?.shortsMinSeconds ?? 60
     const hideThumbnails = settings?.hideThumbnails ?? false
     const greyscaleThumbnails = settings?.greyscaleThumbnails ?? false
-    const [totalItems, youtubeItems, substackItems] = await Promise.all([
-      prisma.feedItem.count({ where: { userId, deletedAt: null } }),
-      prisma.feedItem.count({ where: { userId, deletedAt: null, source: 'youtube' } }),
-      prisma.feedItem.count({ where: { userId, deletedAt: null, source: 'substack' } }),
-    ])
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'app/api/feed/route.ts:38',
-        message: 'feed:requestSettings',
-        data: {
-          cursor: parsedParams.cursor ?? null,
-          limit: parsedParams.limit ?? null,
-          youtubeConnected,
-          hideYoutubeShorts,
-          shortsMinSeconds,
-          hideThumbnails,
-          greyscaleThumbnails,
-          totalItems,
-          youtubeItems,
-          substackItems,
-        },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'feed-empty-1',
-        hypothesisId: 'H2',
-      }),
-    }).catch(() => {})
-    // #endregion
+
 
     // Convert null to undefined to match PaginationParams type
     const params = {
@@ -76,28 +45,30 @@ export async function GET(request: NextRequest) {
       ...(youtubeConnected ? {} : { source: 'substack' as const }),
       hideYoutubeShorts,
       shortsMinSeconds,
+      youtubeChannelIds: userChannels.map((channel) => channel.channelId),
     }
-
-    const result = await getFeed(userId, params)
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        location: 'app/api/feed/route.ts:57',
-        message: 'feed:responseSummary',
+        location: 'app/api/feed/route.ts:50',
+        message: 'feed:requestParams',
         data: {
-          itemCount: result.items.length,
-          hasMore: result.hasMore,
-          hasNextCursor: !!result.nextCursor,
+          cursor: parsedParams.cursor ?? null,
+          limit: parsedParams.limit ?? null,
+          youtubeConnected,
+          channelIds: userChannels.map((channel) => channel.channelId),
         },
         timestamp: Date.now(),
         sessionId: 'debug-session',
-        runId: 'feed-empty-1',
-        hypothesisId: 'H3',
+        runId: 'feed-load-more',
+        hypothesisId: 'H1',
       }),
     }).catch(() => {})
     // #endregion
+
+    const result = await getFeed(userId, params)
     return NextResponse.json({ ...result, hideThumbnails, greyscaleThumbnails })
   } catch (error) {
     if (error instanceof z.ZodError) {

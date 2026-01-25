@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { signIn } from 'next-auth/react'
 import {
   readHideThumbnailsPreference,
   writeHideThumbnailsPreference,
@@ -13,6 +12,42 @@ import {
 async function fetchYouTubeStatus() {
   const res = await fetch('/api/youtube/status')
   if (!res.ok) throw new Error('Failed to fetch YouTube status')
+  return res.json()
+}
+
+async function fetchYoutubeChannels() {
+  const res = await fetch('/api/youtube/channels')
+  if (!res.ok) throw new Error('Failed to fetch YouTube channels')
+  return res.json()
+}
+
+async function addYoutubeChannel(payload: {
+  channelId: string
+  channelTitle: string
+  thumbnail?: string | null
+}) {
+  const res = await fetch('/api/youtube/channels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to add channel' }))
+    throw new Error(error.error || 'Failed to add channel')
+  }
+  return res.json()
+}
+
+async function removeYoutubeChannel(payload: { channelId: string }) {
+  const res = await fetch('/api/youtube/channels', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to remove channel' }))
+    throw new Error(error.error || 'Failed to remove channel')
+  }
   return res.json()
 }
 
@@ -40,17 +75,6 @@ async function updateSettings(data: {
   return res.json()
 }
 
-async function disconnectYouTube() {
-  const res = await fetch('/api/youtube/disconnect', {
-    method: 'POST',
-  })
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Failed to disconnect YouTube' }))
-    throw new Error(error.error || 'Failed to disconnect YouTube')
-  }
-  return res.json()
-}
-
 async function fetchEmailAddress() {
   const res = await fetch('/api/substack/email')
   if (!res.ok) {
@@ -60,23 +84,98 @@ async function fetchEmailAddress() {
   return res.json()
 }
 
+function YoutubeLogoIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="22"
+      height="16"
+      viewBox="0 0 22 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      className={className}
+    >
+      <rect width="22" height="16" rx="4" fill="currentColor" />
+      <path d="M8.5 4.5L15 8L8.5 11.5V4.5Z" fill="#FFFFFF" />
+    </svg>
+  )
+}
+
+function YoutubeChannelThumbnail({
+  src,
+  className,
+}: {
+  src?: string | null
+  className?: string
+}) {
+  const [hasError, setHasError] = useState(false)
+  if (!src || hasError) {
+    return (
+      <div
+        className={`flex items-center justify-center rounded-full bg-gray-100 ${className ?? ''}`}
+        aria-hidden="true"
+      >
+        <YoutubeLogoIcon className="h-4 w-4 text-red-500" />
+      </div>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      className={className}
+      onError={() => setHasError(true)}
+    />
+  )
+}
+
 export default function SettingsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
-  const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [hideYoutubeShorts, setHideYoutubeShorts] = useState(false)
   const [shortsMinSeconds, setShortsMinSeconds] = useState(60)
   const [viewThumbnails, setViewThumbnails] = useState(true)
   const [greyscaleThumbnails, setGreyscaleThumbnails] = useState(false)
   const [isEmailCopied, setIsEmailCopied] = useState(false)
+  const [youtubeQuery, setYoutubeQuery] = useState('')
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [searchResults, setSearchResults] = useState<
+    { channelId: string; channelTitle: string; thumbnail: string | null }[]
+  >([])
+  const [highlightedIndex, setHighlightedIndex] = useState(-1)
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchContainerRef = useRef<HTMLDivElement | null>(null)
   const {
     data: youtubeStatus,
-    refetch: refetchYouTubeStatus,
     isLoading: isYoutubeLoading,
   } = useQuery({
     queryKey: ['youtube-status'],
     queryFn: fetchYouTubeStatus,
+  })
+  const {
+    data: youtubeChannelsData,
+    isLoading: isYoutubeChannelsLoading,
+  } = useQuery({
+    queryKey: ['youtube-channels'],
+    queryFn: fetchYoutubeChannels,
+  })
+
+  const addChannelMutation = useMutation({
+    mutationFn: addYoutubeChannel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['youtube-channels'] })
+      queryClient.invalidateQueries({ queryKey: ['youtube-status'] })
+    },
+  })
+
+  const removeChannelMutation = useMutation({
+    mutationFn: removeYoutubeChannel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['youtube-channels'] })
+      queryClient.invalidateQueries({ queryKey: ['youtube-status'] })
+    },
   })
 
   const { data: settingsData } = useQuery({
@@ -124,21 +223,6 @@ export default function SettingsPage() {
     queryFn: fetchEmailAddress,
   })
 
-  // Check and associate accounts when component mounts or after OAuth
-  useEffect(() => {
-    // Trigger account association after a delay (to allow OAuth callback to complete)
-    const timer = setTimeout(async () => {
-      try {
-        await fetch('/api/auth/associate-account', { method: 'POST' })
-        refetchYouTubeStatus()
-      } catch (error) {
-        // Ignore errors
-      }
-    }, 2000)
-
-    return () => clearTimeout(timer)
-  }, [refetchYouTubeStatus])
-
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -165,6 +249,63 @@ export default function SettingsPage() {
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [])
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (searchContainerRef.current && !searchContainerRef.current.contains(target)) {
+        setIsSearchOpen(false)
+        setSearchResults([])
+        setHighlightedIndex(-1)
+      }
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick)
+    }
+  }, [])
+
+  const youtubeChannels: {
+    channelId: string
+    channelTitle: string
+    thumbnail?: string | null
+  }[] = youtubeChannelsData?.channels ?? []
+
+  useEffect(() => {
+    const query = youtubeQuery.trim()
+    if (query.length < 3) {
+      setIsSearchOpen(false)
+      setSearchResults([])
+      setHighlightedIndex(-1)
+      setSearchError(null)
+      setIsSearching(false)
+      return
+    }
+
+    setIsSearchOpen(true)
+    setIsSearching(true)
+    setSearchError(null)
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/youtube/search?query=${encodeURIComponent(query)}`)
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({ error: 'Search failed' }))
+          throw new Error(error.error || 'Search failed')
+        }
+        const data = await res.json()
+        const results = data.results || []
+        setSearchResults(results)
+        setHighlightedIndex(results.length > 0 ? 0 : -1)
+      } catch (error) {
+        setSearchError(String(error))
+      } finally {
+        setIsSearching(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [youtubeQuery])
 
 
   return (
@@ -221,73 +362,158 @@ export default function SettingsPage() {
             <div className="bg-white rounded-[8px] p-5">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">YouTube</h2>
-                {youtubeStatus?.connected ? (
-                  <button
-                    onClick={async () => {
-                      try {
-                        setIsDisconnecting(true)
-                        await disconnectYouTube()
-                        refetchYouTubeStatus()
-                      } catch (error) {
-                        alert(String(error))
-                      } finally {
-                        setIsDisconnecting(false)
-                      }
-                    }}
-                    disabled={isDisconnecting}
-                    className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
-                  >
-                    {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => signIn('google', { callbackUrl: '/settings' })}
-                    className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm"
-                  >
-                    Connect with Google
-                  </button>
+                <span className="text-sm text-gray-500">
+                  {youtubeChannels.length} channel{youtubeChannels.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                Search and add YouTube channels to sync into your feed.
+              </p>
+              <div className="relative" ref={searchContainerRef}>
+                <input
+                  type="text"
+                  value={youtubeQuery}
+                  onChange={(event) => {
+                    const nextQuery = event.target.value
+                    setYoutubeQuery(nextQuery)
+                    setIsSearchOpen(nextQuery.trim().length >= 3)
+                  }}
+                  onKeyDown={(event) => {
+                    if (searchResults.length === 0) return
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault()
+                      setHighlightedIndex((prev) =>
+                        prev < searchResults.length - 1 ? prev + 1 : 0
+                      )
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      setHighlightedIndex((prev) =>
+                        prev > 0 ? prev - 1 : searchResults.length - 1
+                      )
+                    } else if (event.key === 'Enter') {
+                      event.preventDefault()
+                      const selected = searchResults[highlightedIndex]
+                      if (!selected) return
+                      const alreadyAdded = youtubeChannels.some(
+                        (channel) => channel.channelId === selected.channelId
+                      )
+                      if (alreadyAdded) return
+                      addChannelMutation.mutate({
+                        channelId: selected.channelId,
+                        channelTitle: selected.channelTitle,
+                        thumbnail: selected.thumbnail,
+                      })
+                      setYoutubeQuery('')
+                      setSearchResults([])
+                      setHighlightedIndex(-1)
+                      setIsSearchOpen(false)
+                    } else if (event.key === 'Escape') {
+                      setIsSearchOpen(false)
+                      setSearchResults([])
+                      setHighlightedIndex(-1)
+                    }
+                  }}
+                  placeholder="Search channels"
+                  className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                />
+                {isSearchOpen &&
+                  (isSearching || searchResults.length > 0 || youtubeQuery.trim().length >= 3) && (
+                  <div className="absolute z-10 mt-2 w-full rounded-[8px] border border-gray-200 bg-white shadow-sm">
+                    {isSearching ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">Searching...</div>
+                    ) : searchResults.length > 0 ? (
+                      <div className="max-h-64 overflow-y-auto">
+                        {searchResults.map((result, index) => {
+                          const alreadyAdded = youtubeChannels.some(
+                            (channel) => channel.channelId === result.channelId
+                          )
+                          return (
+                            <button
+                              key={result.channelId}
+                              type="button"
+                              onClick={() => {
+                                if (alreadyAdded) return
+                                addChannelMutation.mutate({
+                                  channelId: result.channelId,
+                                  channelTitle: result.channelTitle,
+                                  thumbnail: result.thumbnail,
+                                })
+                                setYoutubeQuery('')
+                                setSearchResults([])
+                                setHighlightedIndex(-1)
+                              setIsSearchOpen(false)
+                              }}
+                              disabled={alreadyAdded || addChannelMutation.isPending}
+                              className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50 ${
+                                highlightedIndex === index ? 'bg-gray-50' : ''
+                              }`}
+                            >
+                            <YoutubeChannelThumbnail
+                              src={result.thumbnail}
+                              className="h-8 w-8 rounded-full object-cover"
+                            />
+                              <span className="text-sm text-gray-700 truncate">
+                                {result.channelTitle}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-2 text-sm text-gray-500">No results.</div>
+                    )}
+                  </div>
                 )}
               </div>
-              {isYoutubeLoading && !youtubeStatus ? (
-                <>
-                  <div className="h-4 w-40 bg-gray-100 rounded" />
-                  <div className="h-3 w-32 bg-gray-100 rounded" />
-                </>
-              ) : youtubeStatus?.connected ? (
-                <>
-                  <div className="text-sm text-gray-600 mb-2">
-                    <p>
-                      Connected to{' '}
-                      {youtubeStatus.channelName
-                        ? `${youtubeStatus.channelName}'s`
-                        : 'your'}{' '}
-                      YouTube subscriptions.
-                    </p>
-                    <a
-                      href="https://www.youtube.com/feed/channels"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 inline-block text-gray-900 hover:underline"
-                    >
-                      Manage subscriptions
-                    </a>
-                  </div>
-                  {youtubeStatus.lastSyncedAt && (
+              {searchError && (
+                <p className="text-xs text-red-600 mt-2">{searchError}</p>
+              )}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Your channels</p>
+                  {youtubeStatus?.lastSyncedAt && (
                     <p className="text-xs text-gray-500">
                       Last synced: {new Date(youtubeStatus.lastSyncedAt).toLocaleString()}
                     </p>
                   )}
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Connect your YouTube account to sync subscriptions
-                  </p>
-                </>
-              )}
+                </div>
+                {isYoutubeChannelsLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : youtubeChannels.length > 0 ? (
+                  <div className="space-y-2">
+                    {youtubeChannels.map((channel) => (
+                      <div
+                        key={channel.channelId}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <YoutubeChannelThumbnail
+                            src={channel.thumbnail}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                          <span className="text-sm text-gray-700 truncate">
+                            {channel.channelTitle}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeChannelMutation.mutate({ channelId: channel.channelId })
+                          }
+                          disabled={removeChannelMutation.isPending}
+                          className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No channels added yet.</p>
+                )}
+              </div>
 
-              {youtubeStatus?.connected && (
+              {youtubeChannels.length > 0 && (
                 <>
                   <div className="my-4 h-px bg-gray-200" />
                   <div className="flex items-center justify-between">

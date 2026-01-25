@@ -4,93 +4,27 @@ import { BaseConnector } from './base'
 import { prisma } from '@/lib/db'
 
 export class YouTubeConnector extends BaseConnector {
-  private async getAuthenticatedClient(userId: string) {
-    // Get OAuth account from Account table (where NextAuth stores it)
-    const account = await prisma.account.findFirst({
-      where: {
-        userId,
-        provider: 'google',
-      },
-    })
-
-    if (!account || !account.access_token) {
-      throw new Error('YouTube not connected - no Google OAuth account found')
+  private getPublicClient() {
+    const apiKey = process.env.YOUTUBE_API_KEY
+    if (!apiKey) {
+      throw new Error('Missing YOUTUBE_API_KEY')
     }
-
-    // Check if token needs refresh
-    let accessToken = account.access_token
-    const expiresAt = account.expires_at ? new Date(account.expires_at * 1000) : null
-    
-    if (expiresAt && expiresAt < new Date()) {
-      if (!account.refresh_token) {
-        throw new Error('YouTube token expired and no refresh token available')
-      }
-
-      // Refresh token
-      const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        `${process.env.NEXTAUTH_URL}/api/auth/callback/google`
-      )
-
-      oauth2Client.setCredentials({
-        refresh_token: account.refresh_token,
-      })
-
-      const { credentials } = await oauth2Client.refreshAccessToken()
-      accessToken = credentials.access_token!
-
-      // Update account with new token
-      await prisma.account.update({
-        where: { id: account.id },
-        data: {
-          access_token: credentials.access_token || account.access_token,
-          expires_at: credentials.expiry_date ? Math.floor(credentials.expiry_date / 1000) : account.expires_at,
-          refresh_token: credentials.refresh_token || account.refresh_token,
-        },
-      })
-    }
-
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      `${process.env.NEXTAUTH_URL}/api/auth/callback/google`
-    )
-
-    oauth2Client.setCredentials({
-      access_token: accessToken,
-    })
-
-    return google.youtube({ version: 'v3', auth: oauth2Client })
+    return google.youtube({ version: 'v3', auth: apiKey })
   }
 
   async sync(userId: string): Promise<FeedItem[]> {
-    // Check if user has Google OAuth account
-    const account = await prisma.account.findFirst({
-      where: {
-        userId,
-        provider: 'google',
-      },
-    })
-
-    if (!account) {
-      return []
-    }
-
     try {
-      const youtube = await this.getAuthenticatedClient(userId)
+      const youtube = this.getPublicClient()
+      const channels = await prisma.userYoutubeChannel.findMany({
+        where: { userId },
+        select: { channelId: true },
+      })
 
-      // Get subscriptions
-      const subscriptions = await this.getSubscriptions(youtube)
-      
-      if (subscriptions.length === 0) {
-        console.log('No YouTube subscriptions found')
+      if (channels.length === 0) {
         return []
       }
-      
-      console.log(`Found ${subscriptions.length} YouTube subscriptions`)
 
-      const channelsToProcess = subscriptions
+      const channelsToProcess = channels.map((channel) => channel.channelId)
       console.log(`Processing ${channelsToProcess.length} channels`)
       
       // Get recent uploads from subscribed channels
@@ -151,40 +85,6 @@ export class YouTubeConnector extends BaseConnector {
       console.error('Failed to sync YouTube:', error)
       throw error
     }
-  }
-
-  private async getSubscriptions(youtube: any): Promise<string[]> {
-    const channelIds: string[] = []
-    let nextPageToken: string | undefined
-
-    try {
-      do {
-        const response = await youtube.subscriptions.list({
-          part: ['snippet'],
-          mine: true,
-          maxResults: 50,
-          pageToken: nextPageToken,
-        })
-
-        const items = response.data.items || []
-        for (const item of items) {
-          const channelId = item.snippet?.resourceId?.channelId
-          if (channelId) {
-            channelIds.push(channelId)
-          }
-        }
-
-        nextPageToken = response.data.nextPageToken
-      } while (nextPageToken)
-    } catch (error: any) {
-      console.error('Error fetching YouTube subscriptions:', error)
-      if (error.response?.data) {
-        console.error('YouTube API error details:', JSON.stringify(error.response.data, null, 2))
-      }
-      throw new Error(`Failed to fetch subscriptions: ${error.message || 'Unknown error'}`)
-    }
-
-    return channelIds
   }
 
   private async getChannelUploads(youtube: any, channelId: string): Promise<FeedItem[]> {

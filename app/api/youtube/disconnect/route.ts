@@ -13,11 +13,8 @@ export async function POST() {
       },
     })
 
-    await prisma.account.deleteMany({
-      where: {
-        userId,
-        provider: 'google',
-      },
+    await prisma.userYoutubeChannel.deleteMany({
+      where: { userId },
     })
 
     await prisma.youtubeConnection.deleteMany({

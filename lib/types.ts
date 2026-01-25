@@ -44,6 +44,7 @@ export interface PaginationParams {
   source?: 'substack' | 'youtube'
   hideYoutubeShorts?: boolean
   shortsMinSeconds?: number
+  youtubeChannelIds?: string[]
 }
 
 export interface PaginatedResponse<T> {

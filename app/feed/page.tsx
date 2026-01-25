@@ -21,29 +21,7 @@ async function fetchFeed(params: {
 
   const res = await fetch(`/api/feed?${queryParams}`)
   if (!res.ok) throw new Error('Failed to fetch feed')
-  const data = await res.json()
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'app/feed/page.tsx:21',
-      message: 'feed:clientResponse',
-      data: {
-        itemCount: data?.items?.length ?? null,
-        hasMore: data?.hasMore ?? null,
-        hasNextCursor: !!data?.nextCursor,
-        hideThumbnails: data?.hideThumbnails ?? null,
-        greyscaleThumbnails: data?.greyscaleThumbnails ?? null,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'feed-empty-1',
-      hypothesisId: 'H1',
-    }),
-  }).catch(() => {})
-  // #endregion
-  return data
+  return res.json()
 }
 
 async function syncFeeds() {
@@ -118,41 +96,6 @@ export default function FeedPage() {
     }
 
     void loadStatus()
-  }, [])
-
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'app/feed/page.tsx:82',
-        message: 'feed:clientState',
-        data: {
-          itemsCount: items.length,
-          pagesCount: data?.pages?.length ?? null,
-          serverHideThumbnails,
-          serverGreyscaleThumbnails,
-          localHideThumbnails,
-          effectiveHideThumbnails,
-        },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'feed-empty-1',
-        hypothesisId: 'H1',
-      }),
-    }).catch(() => {})
-    // #endregion
-  }, [
-    data?.pages?.length,
-    items.length,
-    serverHideThumbnails,
-    serverGreyscaleThumbnails,
-    localHideThumbnails,
-    effectiveHideThumbnails,
-  ])
-
-  useEffect(() => {
   }, [])
 
   useEffect(() => {
@@ -293,7 +236,7 @@ export default function FeedPage() {
             <div className="text-center py-12 text-gray-500">
               <p>No items in feed yet.</p>
               <p className="mt-2 text-sm">
-                Add Substack newsletters or connect YouTube to get started.
+                Add Substack newsletters or add YouTube channels to get started.
               </p>
             </div>
           )}
