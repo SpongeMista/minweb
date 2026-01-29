@@ -21,6 +21,18 @@ async function fetchYoutubeChannels() {
   return res.json()
 }
 
+async function fetchRedditStatus() {
+  const res = await fetch('/api/reddit/status')
+  if (!res.ok) throw new Error('Failed to fetch Reddit status')
+  return res.json()
+}
+
+async function fetchRedditSubreddits() {
+  const res = await fetch('/api/reddit/subreddits')
+  if (!res.ok) throw new Error('Failed to fetch Reddit subreddits')
+  return res.json()
+}
+
 async function addYoutubeChannel(payload: {
   channelId: string
   channelTitle: string
@@ -51,18 +63,49 @@ async function removeYoutubeChannel(payload: { channelId: string }) {
   return res.json()
 }
 
+async function addRedditSubreddit(payload: {
+  subreddit: string
+  title: string
+  icon?: string | null
+  sort?: 'new' | 'hot' | 'top'
+}) {
+  const res = await fetch('/api/reddit/subreddits', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to add subreddit' }))
+    throw new Error(error.error || 'Failed to add subreddit')
+  }
+  return res.json()
+}
+
+async function removeRedditSubreddit(payload: { subreddit: string }) {
+  const res = await fetch('/api/reddit/subreddits', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to remove subreddit' }))
+    throw new Error(error.error || 'Failed to remove subreddit')
+  }
+  return res.json()
+}
+
 async function fetchSettings() {
   const res = await fetch('/api/settings')
   if (!res.ok) throw new Error('Failed to fetch settings')
   return res.json()
 }
 
-async function updateSettings(data: {
-  hideYoutubeShorts?: boolean
-  shortsMinSeconds?: number
-  hideThumbnails?: boolean
-  greyscaleThumbnails?: boolean
-}) {
+  async function updateSettings(data: {
+    hideYoutubeShorts?: boolean
+    shortsMinSeconds?: number
+    hideThumbnails?: boolean
+    greyscaleThumbnails?: boolean
+  }) {
   const res = await fetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -101,6 +144,37 @@ function YoutubeLogoIcon({ className }: { className?: string }) {
   )
 }
 
+function RedditLogoIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="10" fill="currentColor" />
+      <circle cx="9" cy="11" r="1.2" fill="#FFFFFF" />
+      <circle cx="15" cy="11" r="1.2" fill="#FFFFFF" />
+      <path
+        d="M8.5 14.5c1.4 1.1 5.6 1.1 7 0"
+        stroke="#FFFFFF"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <circle cx="17.3" cy="7.2" r="1.2" fill="#FFFFFF" />
+      <path
+        d="M12.5 6.8l3-0.9"
+        stroke="#FFFFFF"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function YoutubeChannelThumbnail({
   src,
   className,
@@ -116,6 +190,34 @@ function YoutubeChannelThumbnail({
         aria-hidden="true"
       >
         <YoutubeLogoIcon className="h-4 w-4 text-red-500" />
+      </div>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      className={className}
+      onError={() => setHasError(true)}
+    />
+  )
+}
+
+function RedditSubredditThumbnail({
+  src,
+  className,
+}: {
+  src?: string | null
+  className?: string
+}) {
+  const [hasError, setHasError] = useState(false)
+  if (!src || hasError) {
+    return (
+      <div
+        className={`flex items-center justify-center rounded-full bg-gray-100 ${className ?? ''}`}
+        aria-hidden="true"
+      >
+        <RedditLogoIcon className="h-4 w-4 text-orange-500" />
       </div>
     )
   }
@@ -145,8 +247,17 @@ export default function SettingsPage() {
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  const [redditQuery, setRedditQuery] = useState('')
+  const [isRedditSearchOpen, setIsRedditSearchOpen] = useState(false)
+  const [redditResults, setRedditResults] = useState<
+    { subreddit: string; title: string; icon: string | null }[]
+  >([])
+  const [redditHighlightedIndex, setRedditHighlightedIndex] = useState(-1)
+  const [isRedditSearching, setIsRedditSearching] = useState(false)
+  const [redditSearchError, setRedditSearchError] = useState<string | null>(null)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchContainerRef = useRef<HTMLDivElement | null>(null)
+  const redditSearchContainerRef = useRef<HTMLDivElement | null>(null)
   const {
     data: youtubeStatus,
     isLoading: isYoutubeLoading,
@@ -161,12 +272,24 @@ export default function SettingsPage() {
     queryKey: ['youtube-channels'],
     queryFn: fetchYoutubeChannels,
   })
+  const { data: redditStatus } = useQuery({
+    queryKey: ['reddit-status'],
+    queryFn: fetchRedditStatus,
+  })
+  const {
+    data: redditSubredditsData,
+    isLoading: isRedditSubredditsLoading,
+  } = useQuery({
+    queryKey: ['reddit-subreddits'],
+    queryFn: fetchRedditSubreddits,
+  })
 
   const addChannelMutation = useMutation({
     mutationFn: addYoutubeChannel,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['youtube-channels'] })
       queryClient.invalidateQueries({ queryKey: ['youtube-status'] })
+      sessionStorage.setItem('settingsChangeStamp', String(Date.now()))
     },
   })
 
@@ -175,6 +298,25 @@ export default function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['youtube-channels'] })
       queryClient.invalidateQueries({ queryKey: ['youtube-status'] })
+      sessionStorage.setItem('settingsChangeStamp', String(Date.now()))
+    },
+  })
+
+  const addSubredditMutation = useMutation({
+    mutationFn: addRedditSubreddit,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reddit-subreddits'] })
+      queryClient.invalidateQueries({ queryKey: ['reddit-status'] })
+      sessionStorage.setItem('settingsChangeStamp', String(Date.now()))
+    },
+  })
+
+  const removeSubredditMutation = useMutation({
+    mutationFn: removeRedditSubreddit,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reddit-subreddits'] })
+      queryClient.invalidateQueries({ queryKey: ['reddit-status'] })
+      sessionStorage.setItem('settingsChangeStamp', String(Date.now()))
     },
   })
 
@@ -258,6 +400,14 @@ export default function SettingsPage() {
         setSearchResults([])
         setHighlightedIndex(-1)
       }
+      if (
+        redditSearchContainerRef.current &&
+        !redditSearchContainerRef.current.contains(target)
+      ) {
+        setIsRedditSearchOpen(false)
+        setRedditResults([])
+        setRedditHighlightedIndex(-1)
+      }
     }
 
     document.addEventListener('mousedown', handleOutsideClick)
@@ -271,6 +421,12 @@ export default function SettingsPage() {
     channelTitle: string
     thumbnail?: string | null
   }[] = youtubeChannelsData?.channels ?? []
+  const redditSubreddits: {
+    subreddit: string
+    title: string
+    icon?: string | null
+    sort?: 'new' | 'hot' | 'top'
+  }[] = redditSubredditsData?.subreddits ?? []
 
   useEffect(() => {
     const query = youtubeQuery.trim()
@@ -306,6 +462,41 @@ export default function SettingsPage() {
 
     return () => clearTimeout(timeout)
   }, [youtubeQuery])
+
+  useEffect(() => {
+    const query = redditQuery.trim()
+    if (query.length < 2) {
+      setIsRedditSearchOpen(false)
+      setRedditResults([])
+      setRedditHighlightedIndex(-1)
+      setRedditSearchError(null)
+      setIsRedditSearching(false)
+      return
+    }
+
+    setIsRedditSearchOpen(true)
+    setIsRedditSearching(true)
+    setRedditSearchError(null)
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/reddit/search?query=${encodeURIComponent(query)}`)
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({ error: 'Search failed' }))
+          throw new Error(error.error || 'Search failed')
+        }
+        const data = await res.json()
+        const results = data.results || []
+        setRedditResults(results)
+        setRedditHighlightedIndex(results.length > 0 ? 0 : -1)
+      } catch (error) {
+        setRedditSearchError(String(error))
+      } finally {
+        setIsRedditSearching(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [redditQuery])
 
 
   return (
@@ -501,7 +692,7 @@ export default function SettingsPage() {
                             removeChannelMutation.mutate({ channelId: channel.channelId })
                           }
                           disabled={removeChannelMutation.isPending}
-                          className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                          className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
                         >
                           Remove
                         </button>
@@ -566,6 +757,199 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
+            </div>
+          </section>
+
+          {/* Reddit Connection */}
+          <section>
+            <div className="bg-white rounded-[8px] p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Reddit</h2>
+                <span className="text-sm text-gray-500">
+                  {redditSubreddits.length} subreddit{redditSubreddits.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                Search and add public subreddits to sync into your feed.
+              </p>
+              <div className="relative" ref={redditSearchContainerRef}>
+                <input
+                  type="text"
+                  value={redditQuery}
+                  onChange={(event) => {
+                    const nextQuery = event.target.value
+                    setRedditQuery(nextQuery)
+                    setIsRedditSearchOpen(nextQuery.trim().length >= 2)
+                  }}
+                  onKeyDown={(event) => {
+                    if (redditResults.length === 0) return
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault()
+                      setRedditHighlightedIndex((prev) =>
+                        prev < redditResults.length - 1 ? prev + 1 : 0
+                      )
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      setRedditHighlightedIndex((prev) =>
+                        prev > 0 ? prev - 1 : redditResults.length - 1
+                      )
+                    } else if (event.key === 'Enter') {
+                      event.preventDefault()
+                      const selected = redditResults[redditHighlightedIndex]
+                      if (!selected) return
+                      const alreadyAdded = redditSubreddits.some(
+                        (subreddit) =>
+                          subreddit.subreddit.toLowerCase() === selected.subreddit.toLowerCase()
+                      )
+                      if (alreadyAdded) return
+                      addSubredditMutation.mutate({
+                        subreddit: selected.subreddit,
+                        title: selected.title,
+                        icon: selected.icon,
+                      })
+                      setRedditQuery('')
+                      setRedditResults([])
+                      setRedditHighlightedIndex(-1)
+                      setIsRedditSearchOpen(false)
+                    } else if (event.key === 'Escape') {
+                      setIsRedditSearchOpen(false)
+                      setRedditResults([])
+                      setRedditHighlightedIndex(-1)
+                    }
+                  }}
+                  placeholder="Search subreddits"
+                  className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                />
+                {isRedditSearchOpen &&
+                  (isRedditSearching ||
+                    redditResults.length > 0 ||
+                    redditQuery.trim().length >= 2) && (
+                    <div className="absolute z-10 mt-2 w-full rounded-[8px] border border-gray-200 bg-white shadow-sm">
+                      {isRedditSearching ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">Searching...</div>
+                      ) : redditResults.length > 0 ? (
+                        <div className="max-h-64 overflow-y-auto">
+                          {redditResults.map((result, index) => {
+                            const alreadyAdded = redditSubreddits.some(
+                              (subreddit) =>
+                                subreddit.subreddit.toLowerCase() === result.subreddit.toLowerCase()
+                            )
+                            return (
+                              <button
+                                key={result.subreddit}
+                                type="button"
+                                onClick={() => {
+                                  if (alreadyAdded) return
+                                  addSubredditMutation.mutate({
+                                    subreddit: result.subreddit,
+                                    title: result.title,
+                                    icon: result.icon,
+                                  })
+                                  setRedditQuery('')
+                                  setRedditResults([])
+                                  setRedditHighlightedIndex(-1)
+                                  setIsRedditSearchOpen(false)
+                                }}
+                                disabled={alreadyAdded || addSubredditMutation.isPending}
+                                className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50 ${
+                                  redditHighlightedIndex === index ? 'bg-gray-50' : ''
+                                }`}
+                              >
+                                <RedditSubredditThumbnail
+                                  src={result.icon}
+                                  className="h-8 w-8 rounded-full object-cover"
+                                />
+                                <div className="min-w-0">
+                                  <span className="text-sm text-gray-700 truncate block">
+                                    r/{result.subreddit}
+                                  </span>
+                                  <span className="text-xs text-gray-500 truncate block">
+                                    {result.title}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-gray-500">No results.</div>
+                      )}
+                    </div>
+                  )}
+              </div>
+              {redditSearchError && (
+                <p className="text-xs text-red-600 mt-2">{redditSearchError}</p>
+              )}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Your subreddits</p>
+                  {redditStatus?.lastSyncedAt && (
+                    <p className="text-xs text-gray-500">
+                      Last synced: {new Date(redditStatus.lastSyncedAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                {isRedditSubredditsLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : redditSubreddits.length > 0 ? (
+                  <div className="space-y-2">
+                    {redditSubreddits.map((subreddit) => (
+                      <div
+                        key={subreddit.subreddit}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <RedditSubredditThumbnail
+                            src={subreddit.icon}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                          <div className="min-w-0">
+                            <span className="text-sm text-gray-700 truncate block">
+                              r/{subreddit.subreddit}
+                            </span>
+                            <span className="text-xs text-gray-500 truncate block">
+                              {subreddit.title}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">Sort by:</span>
+                          <select
+                            value={subreddit.sort ?? 'new'}
+                            onChange={(event) => {
+                              const nextValue = event.target.value as 'new' | 'hot' | 'top'
+                              addSubredditMutation.mutate({
+                                subreddit: subreddit.subreddit,
+                                title: subreddit.title,
+                                icon: subreddit.icon,
+                                sort: nextValue,
+                              })
+                            }}
+                            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                          >
+                            <option value="new">New</option>
+                            <option value="hot">Hot</option>
+                            <option value="top">Top</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removeSubredditMutation.mutate({ subreddit: subreddit.subreddit })
+                            }
+                            disabled={removeSubredditMutation.isPending}
+                            className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No subreddits added yet.</p>
+                )}
+              </div>
+
             </div>
           </section>
 

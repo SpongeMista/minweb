@@ -15,6 +15,12 @@ export class YouTubeConnector extends BaseConnector {
   async sync(userId: string): Promise<FeedItem[]> {
     try {
       const youtube = this.getPublicClient()
+      const settings = await prisma.userSettings.findUnique({
+        where: { userId },
+        select: { hideYoutubeShorts: true, shortsMinSeconds: true },
+      })
+      const hideYoutubeShorts = settings?.hideYoutubeShorts ?? false
+      const shortsMinSeconds = settings?.shortsMinSeconds ?? 60
       const channels = await prisma.userYoutubeChannel.findMany({
         where: { userId },
         select: { channelId: true },
@@ -34,7 +40,11 @@ export class YouTubeConnector extends BaseConnector {
       
       for (const channelId of channelsToProcess) {
         try {
-          const items = await this.getChannelUploads(youtube, channelId)
+          const items = await this.getChannelUploads(youtube, channelId, {
+            targetCount: 10,
+            hideYoutubeShorts,
+            shortsMinSeconds,
+          })
           allItems.push(...items)
           successCount++
           if (items.length > 0) {
@@ -87,7 +97,50 @@ export class YouTubeConnector extends BaseConnector {
     }
   }
 
-  private async getChannelUploads(youtube: any, channelId: string): Promise<FeedItem[]> {
+  async backfill(userId: string, before: Date, cutoff: Date): Promise<FeedItem[]> {
+    const youtube = this.getPublicClient()
+    const settings = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { hideYoutubeShorts: true, shortsMinSeconds: true },
+    })
+    const hideYoutubeShorts = settings?.hideYoutubeShorts ?? false
+    const shortsMinSeconds = settings?.shortsMinSeconds ?? 60
+    const channels = await prisma.userYoutubeChannel.findMany({
+      where: { userId },
+      select: { channelId: true },
+    })
+    if (channels.length === 0) return []
+
+    const allItems: FeedItem[] = []
+    for (const channel of channels) {
+      const items = await this.getChannelUploads(youtube, channel.channelId, {
+        targetCount: 10,
+        hideYoutubeShorts,
+        shortsMinSeconds,
+        before,
+        cutoff,
+      })
+      allItems.push(...items)
+    }
+
+    if (allItems.length > 0) {
+      await this.upsertFeedItems(userId, allItems)
+    }
+
+    return allItems
+  }
+
+  private async getChannelUploads(
+    youtube: any,
+    channelId: string,
+    options: {
+      targetCount: number
+      hideYoutubeShorts: boolean
+      shortsMinSeconds: number
+      before?: Date
+      cutoff?: Date
+    }
+  ): Promise<FeedItem[]> {
     try {
       // Combine both channel API calls into one to reduce API quota usage
       const channelResponse = await youtube.channels.list({
@@ -111,70 +164,107 @@ export class YouTubeConnector extends BaseConnector {
       const channelName = channel.snippet?.title || 'Unknown Channel'
 
       // Get recent videos from uploads playlist
-      // Limit to 5 videos per channel to reduce API calls and quota usage
-      const playlistResponse = await youtube.playlistItems.list({
-        part: ['snippet', 'contentDetails'],
-        playlistId: uploadsPlaylistId,
-        maxResults: 5, // Reduced to 5 per channel
-      })
-
-      if (!playlistResponse.data || !playlistResponse.data.items) {
-        return []
-      }
-
       const items: FeedItem[] = []
-      const videoIds: string[] = []
+      let pageToken: string | undefined
+      let pageCount = 0
+      const maxPages = 5
 
-      for (const item of playlistResponse.data.items) {
-      try {
-        const videoId = item.contentDetails?.videoId
-        if (!videoId) continue
-        videoIds.push(videoId)
+      while (items.length < options.targetCount && pageCount < maxPages) {
+        const playlistResponse = await youtube.playlistItems.list({
+          part: ['snippet', 'contentDetails'],
+          playlistId: uploadsPlaylistId,
+          maxResults: options.hideYoutubeShorts ? 25 : options.targetCount,
+          pageToken,
+        })
 
-        const snippet = item.snippet
-        const title = snippet?.title || 'Untitled'
-        const publishedAt = snippet?.publishedAt
-          ? this.normalizeTimestamp(snippet.publishedAt)
-          : new Date()
-        const thumbnail =
-          snippet?.thumbnails?.high?.url ||
-          snippet?.thumbnails?.medium?.url ||
-          snippet?.thumbnails?.default?.url ||
-          null
-        const description = snippet?.description || ''
-
-        const feedItem: FeedItem = {
-          source: 'youtube',
-          sourceId: videoId,
-          title: this.sanitizeTitle(title),
-          author: channelName,
-          publishedAt,
-          excerpt: this.extractExcerpt(description),
-          url: `https://www.youtube.com/watch?v=${videoId}`,
-          thumbnail,
-          durationSeconds: null,
-          rawPayload: item,
+        if (!playlistResponse.data || !playlistResponse.data.items) {
+          break
         }
 
-        FeedItemSchema.parse(feedItem)
-        items.push(feedItem)
-      } catch (error) {
-        console.error('Failed to parse YouTube item:', error)
-        // Skip invalid items
-      }
-    }
+        const videoIds: string[] = []
+        const pageItems: FeedItem[] = []
+        let oldestPublishedAt: Date | null = null
 
-      if (videoIds.length > 0) {
-        const durations = await this.getVideoDurations(youtube, videoIds)
-        for (const feedItem of items) {
-          const duration = durations.get(feedItem.sourceId)
-          if (duration !== undefined) {
-            feedItem.durationSeconds = duration
+        for (const item of playlistResponse.data.items) {
+          try {
+            const videoId = item.contentDetails?.videoId
+            if (!videoId) continue
+            videoIds.push(videoId)
+
+            const snippet = item.snippet
+            const title = snippet?.title || 'Untitled'
+            const publishedAt = snippet?.publishedAt
+              ? this.normalizeTimestamp(snippet.publishedAt)
+              : new Date()
+            oldestPublishedAt =
+              !oldestPublishedAt || publishedAt < oldestPublishedAt ? publishedAt : oldestPublishedAt
+
+            if (options.before && publishedAt >= options.before) {
+              continue
+            }
+            if (options.cutoff && publishedAt < options.cutoff) {
+              continue
+            }
+
+            const thumbnail =
+              snippet?.thumbnails?.high?.url ||
+              snippet?.thumbnails?.medium?.url ||
+              snippet?.thumbnails?.default?.url ||
+              null
+            const description = snippet?.description || ''
+
+            const feedItem: FeedItem = {
+              source: 'youtube',
+              sourceId: videoId,
+              title: this.sanitizeTitle(title),
+              author: channelName,
+              publishedAt,
+              excerpt: this.extractExcerpt(description),
+              url: `https://www.youtube.com/watch?v=${videoId}`,
+              thumbnail,
+              durationSeconds: null,
+              rawPayload: item,
+            }
+
+            FeedItemSchema.parse(feedItem)
+            pageItems.push(feedItem)
+          } catch (error) {
+            console.error('Failed to parse YouTube item:', error)
           }
         }
+
+        if (videoIds.length > 0 && pageItems.length > 0) {
+          const durations = await this.getVideoDurations(youtube, videoIds)
+          for (const feedItem of pageItems) {
+            const duration = durations.get(feedItem.sourceId)
+            if (duration !== undefined) {
+              feedItem.durationSeconds = duration
+            }
+          }
+        }
+
+        for (const feedItem of pageItems) {
+          if (
+            options.hideYoutubeShorts &&
+            feedItem.durationSeconds !== null &&
+            feedItem.durationSeconds !== undefined &&
+            feedItem.durationSeconds < options.shortsMinSeconds
+          ) {
+            continue
+          }
+          items.push(feedItem)
+          if (items.length >= options.targetCount) break
+        }
+
+        pageToken = playlistResponse.data.nextPageToken || undefined
+        pageCount += 1
+        if (!pageToken) break
+        if (options.cutoff && oldestPublishedAt && oldestPublishedAt < options.cutoff) {
+          break
+        }
       }
 
-      return items
+      return items.slice(0, options.targetCount)
     } catch (error: any) {
       // Log detailed error information
       const errorCode = error.code || error.response?.status

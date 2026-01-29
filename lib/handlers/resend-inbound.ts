@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getEmailService } from '@/lib/services/email-service'
-import { parseEmail, emailToFeedItem } from '@/lib/parsers/email-parser'
+import { parseEmail, emailToFeedItem, extractEmailContent, stripSubstackTracking } from '@/lib/parsers/email-parser'
 import { prisma } from '@/lib/db'
 import { getDefaultUserId } from '@/lib/default-user'
 
@@ -107,8 +107,14 @@ export async function handleResendInbound(request: NextRequest) {
     let emailHtml: string | null = null
     let emailText: string | null = null
     if (typeof rawEmail === 'string') {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H3',location:'lib/handlers/resend-inbound.ts:109',message:'parseEmail branch raw string',data:{eventType,hasHtml:typeof emailData?.html === 'string',hasText:typeof emailData?.text === 'string'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion agent log
       parsedEmail = await parseEmail(Buffer.from(rawEmail))
     } else if (emailData.html || emailData.text || emailData.text_plain) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H3',location:'lib/handlers/resend-inbound.ts:113',message:'parseEmail branch plain fields',data:{eventType,hasHtml:Boolean(emailData.html || emailData.text_html),hasText:Boolean(emailData.text || emailData.text_plain)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion agent log
       const htmlContent = emailData.html || emailData.text_html || ''
       const textContent = emailData.text || emailData.text_plain || ''
       parsedEmail = {
@@ -126,6 +132,9 @@ export async function handleResendInbound(request: NextRequest) {
         images: [],
       }
     } else {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H3',location:'lib/handlers/resend-inbound.ts:128',message:'parseEmail branch fallback empty',data:{eventType},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion agent log
       parsedEmail = {
         subject: emailData.subject || 'No Subject',
         from: typeof emailData.from === 'string'
@@ -155,14 +164,31 @@ export async function handleResendInbound(request: NextRequest) {
       try {
         const received = await fetchReceivedEmailContent(candidateIds)
         emailHtml = received.html
-        emailText = received.text
+        emailText = received.text ? stripSubstackTracking(received.text) : received.text
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H5',location:'lib/handlers/resend-inbound.ts:158',message:'received email content',data:{htmlLen:emailHtml?.length ?? 0,textLen:emailText?.length ?? 0,textHasTracking:(emailText || '').includes('eotrx.substackcdn.com/open?token='),htmlHasTracking:(emailHtml || '').includes('eotrx.substackcdn.com/open?token='),hasHtml:Boolean(emailHtml),hasText:Boolean(emailText)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion agent log
       } catch (error) {
         console.error('Failed to fetch received email content:', error)
       }
     } else {
     }
 
+    if (emailHtml || emailText) {
+      const extracted = extractEmailContent({ text: emailText, html: emailHtml })
+      parsedEmail = {
+        ...parsedEmail,
+        ...extracted,
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H6',location:'lib/handlers/resend-inbound.ts:170',message:'extracted email content',data:{textLen:parsedEmail.textContent.length,links:parsedEmail.links.length,images:parsedEmail.images.length,trackingFound:(parsedEmail.textContent || '').includes('eotrx.substackcdn.com/open?token=')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion agent log
+    }
+
     const feedItem = emailToFeedItem(parsedEmail, source.publicationName)
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H4',location:'lib/handlers/resend-inbound.ts:165',message:'feed item from email',data:{excerptLen:feedItem.excerpt?.length ?? 0,excerptHasTracking:(feedItem.excerpt || '').includes('eotrx.substackcdn.com/open?token='),thumbnailPresent:Boolean(feedItem.thumbnail)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
     const userId = await getDefaultUserId()
 
     await prisma.feedItem.upsert({

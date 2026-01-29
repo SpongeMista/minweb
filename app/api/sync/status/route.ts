@@ -6,10 +6,16 @@ export async function GET() {
   try {
     const userId = await getDefaultUserId()
 
-    const youtubeConnection = await prisma.youtubeConnection.findUnique({
-      where: { userId },
-      select: { lastSyncedAt: true },
-    })
+    const [youtubeConnection, redditConnection] = await Promise.all([
+      prisma.youtubeConnection.findUnique({
+        where: { userId },
+        select: { lastSyncedAt: true },
+      }),
+      prisma.redditConnection.findUnique({
+        where: { userId },
+        select: { lastSyncedAt: true },
+      }),
+    ])
 
     const latestSubstack = await prisma.substackSource.findFirst({
       where: { userId },
@@ -18,9 +24,10 @@ export async function GET() {
     })
 
     const youtubeLastSyncedAt = youtubeConnection?.lastSyncedAt ?? null
+    const redditLastSyncedAt = redditConnection?.lastSyncedAt ?? null
     const emailLastSyncedAt = latestSubstack?.lastSyncedAt ?? null
 
-    const candidates = [youtubeLastSyncedAt, emailLastSyncedAt].filter(
+    const candidates = [youtubeLastSyncedAt, redditLastSyncedAt, emailLastSyncedAt].filter(
       (value): value is Date => Boolean(value)
     )
 
@@ -32,6 +39,7 @@ export async function GET() {
     return NextResponse.json({
       lastSyncedAt,
       youtubeLastSyncedAt,
+      redditLastSyncedAt,
       emailLastSyncedAt,
     })
   } catch (error) {

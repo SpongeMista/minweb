@@ -8,6 +8,7 @@ const UpdateSchema = z.object({
   shortsMinSeconds: z.number().int().min(1).max(3600).optional(),
   hideThumbnails: z.boolean().optional(),
   greyscaleThumbnails: z.boolean().optional(),
+  feedType: z.enum(['chronological', 'balanced']).optional(),
 })
 
 export async function GET() {
@@ -23,6 +24,7 @@ export async function GET() {
       shortsMinSeconds: settings?.shortsMinSeconds ?? 60,
       hideThumbnails: settings?.hideThumbnails ?? false,
       greyscaleThumbnails: settings?.greyscaleThumbnails ?? false,
+      feedType: settings?.feedType ?? 'balanced',
     })
   } catch (error) {
     console.error('Settings API error:', error)
@@ -34,7 +36,7 @@ export async function PUT(request: NextRequest) {
   try {
     const userId = await getDefaultUserId()
     const body = await request.json()
-    const { hideYoutubeShorts, shortsMinSeconds, hideThumbnails, greyscaleThumbnails } =
+    const { hideYoutubeShorts, shortsMinSeconds, hideThumbnails, greyscaleThumbnails, feedType } =
       UpdateSchema.parse(body)
 
     const settings = await prisma.userSettings.upsert({
@@ -45,12 +47,14 @@ export async function PUT(request: NextRequest) {
         shortsMinSeconds: shortsMinSeconds ?? 60,
         hideThumbnails: hideThumbnails ?? false,
         greyscaleThumbnails: greyscaleThumbnails ?? false,
+        feedType: feedType ?? 'balanced',
       },
       update: {
         ...(hideYoutubeShorts !== undefined ? { hideYoutubeShorts } : {}),
         ...(shortsMinSeconds !== undefined ? { shortsMinSeconds } : {}),
         ...(hideThumbnails !== undefined ? { hideThumbnails } : {}),
         ...(greyscaleThumbnails !== undefined ? { greyscaleThumbnails } : {}),
+        ...(feedType !== undefined ? { feedType } : {}),
       },
     })
 
@@ -59,6 +63,7 @@ export async function PUT(request: NextRequest) {
       shortsMinSeconds: settings.shortsMinSeconds,
       hideThumbnails: settings.hideThumbnails,
       greyscaleThumbnails: settings.greyscaleThumbnails,
+      feedType: settings.feedType,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {

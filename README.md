@@ -187,7 +187,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://your-app.vercel.app/api/cro
 
 ### Sync
 - `POST /api/sync` - Manually trigger sync
-  - Body: `{ source?: 'substack' | 'youtube' | 'all' }`
+- Body: `{ source?: 'substack' | 'youtube' | 'reddit' | 'all' }`
 
 ### Substack Sources
 - `GET /api/substack` - List user's Substack sources

@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 // Normalized feed item structure
 export interface FeedItem {
-  source: 'substack' | 'youtube'
+  source: 'substack' | 'youtube' | 'reddit'
   sourceId: string // Unique ID from source
   title: string
   author: string | null
@@ -18,7 +18,7 @@ export interface FeedItem {
 
 // Validation schemas
 export const FeedItemSchema = z.object({
-  source: z.enum(['substack', 'youtube']),
+  source: z.enum(['substack', 'youtube', 'reddit']),
   sourceId: z.string().min(1),
   title: z.string().min(1),
   author: z.string().nullable(),
@@ -41,10 +41,12 @@ export interface Connector {
 export interface PaginationParams {
   cursor?: string
   limit?: number
-  source?: 'substack' | 'youtube'
+  source?: 'substack' | 'youtube' | 'reddit'
   hideYoutubeShorts?: boolean
   shortsMinSeconds?: number
   youtubeChannelIds?: string[]
+  redditSubreddits?: string[]
+  feedType?: 'chronological' | 'balanced'
 }
 
 export interface PaginatedResponse<T> {

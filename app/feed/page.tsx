@@ -1,7 +1,7 @@
 'use client'
 
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import FeedItem from '@/components/FeedItem'
 import {
@@ -21,7 +21,11 @@ async function fetchFeed(params: {
 
   const res = await fetch(`/api/feed?${queryParams}`)
   if (!res.ok) throw new Error('Failed to fetch feed')
-  return res.json()
+  const data = await res.json()
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H8',location:'app/feed/page.tsx:23',message:'client feed substack summary',data:{total:data?.items?.length ?? 0,substackCount:(data?.items||[]).filter((item:any)=>item.source==='substack').length,substackSample:(data?.items||[]).filter((item:any)=>item.source==='substack').slice(0,3).map((item:any)=>({excerptHasTracking:typeof item.excerpt==='string'&&item.excerpt.includes('eotrx.substackcdn.com/open?token='),emailTextHasTracking:typeof item.emailText==='string'&&item.emailText.includes('eotrx.substackcdn.com/open?token='),thumbnailPresent:Boolean(item.thumbnail),thumbnailHost:(()=>{try{return item.thumbnail?new URL(item.thumbnail).host:null}catch{return null}})()}))},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion agent log
+  return data
 }
 
 async function syncFeeds() {
@@ -47,6 +51,8 @@ export default function FeedPage() {
   const lastScrollYRef = useRef(0)
   const [syncInFlight, setSyncInFlight] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
+  const feedTypeMeasureRef = useRef<HTMLSpanElement | null>(null)
+  const [feedTypeSelectWidth, setFeedTypeSelectWidth] = useState<number | null>(null)
 
   const {
     data,
@@ -69,19 +75,36 @@ export default function FeedPage() {
   const items = data?.pages.flatMap((page) => page.items) || []
   const serverHideThumbnails = data?.pages[0]?.hideThumbnails ?? false
   const serverGreyscaleThumbnails = data?.pages[0]?.greyscaleThumbnails ?? false
+  const serverFeedType = data?.pages[0]?.feedType ?? 'balanced'
   const initialHideThumbnails = readHideThumbnailsPreferenceSync()
   const [localHideThumbnails, setLocalHideThumbnails] =
     useHideThumbnailsPreference(initialHideThumbnails)
   const effectiveHideThumbnails = localHideThumbnails ?? serverHideThumbnails
+  const [feedType, setFeedType] = useState<'chronological' | 'balanced'>(serverFeedType)
+  const feedTypeLabel = feedType === 'balanced' ? 'Balanced' : 'Timeline'
 
   useEffect(() => {
     const changeStamp = sessionStorage.getItem('settingsChangeStamp')
-    if (changeStamp) {
-      queryClient.invalidateQueries({ queryKey: ['feed'] })
-      refetch()
-      sessionStorage.removeItem('settingsChangeStamp')
+    if (!changeStamp) return
+
+    const syncAfterSettings = async () => {
+      try {
+        setSyncInFlight(true)
+        await syncFeeds()
+        const status = await fetchSyncStatus()
+        setLastSyncedAt(status?.lastSyncedAt ? new Date(status.lastSyncedAt) : null)
+        queryClient.invalidateQueries({ queryKey: ['feed'] })
+        await refetch()
+      } catch (error) {
+        console.error('Sync after settings error:', error)
+      } finally {
+        setSyncInFlight(false)
+        sessionStorage.removeItem('settingsChangeStamp')
+      }
     }
-  }, [])
+
+    void syncAfterSettings()
+  }, [queryClient, refetch])
 
   const isSyncing = syncInFlight || isFetching || isFetchingNextPage
 
@@ -117,6 +140,19 @@ export default function FeedPage() {
       }
     }
   }, [localHideThumbnails, serverHideThumbnails])
+
+  useEffect(() => {
+    setFeedType(serverFeedType)
+  }, [serverFeedType])
+
+  useLayoutEffect(() => {
+    if (!feedTypeMeasureRef.current) return
+    feedTypeMeasureRef.current.textContent = feedTypeLabel
+    const textWidth = feedTypeMeasureRef.current.getBoundingClientRect().width
+    if (Number.isFinite(textWidth) && textWidth > 0) {
+      setFeedTypeSelectWidth(Math.ceil(textWidth))
+    }
+  }, [feedTypeLabel])
 
   useEffect(() => {
     const saved = sessionStorage.getItem('feedScrollY')
@@ -192,7 +228,7 @@ export default function FeedPage() {
 
   // Auto-sync on page load if stale
   useEffect(() => {
-    const SYNC_THRESHOLD_MS = 5 * 60 * 1000
+    const SYNC_THRESHOLD_MS = 60 * 1000
     let isActive = true
 
     const maybeSync = async () => {
@@ -232,11 +268,61 @@ export default function FeedPage() {
     <div className="min-h-screen bg-[#F5F5F5]">
       <main className="max-w-[648px] mx-auto px-4 py-8">
         <div className="space-y-4">
+          <div className="feed-type-control">
+            <span
+              className="feed-type-label text-sm text-gray-700"
+              style={feedTypeSelectWidth ? { minWidth: `${feedTypeSelectWidth}px` } : undefined}
+              aria-hidden="true"
+            >
+              {feedTypeLabel}
+            </span>
+            <select
+              value={feedType}
+              onChange={async (event) => {
+                const nextValue = event.target.value as 'chronological' | 'balanced'
+                setFeedType(nextValue)
+                await fetch('/api/settings', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ feedType: nextValue }),
+                })
+                queryClient.invalidateQueries({ queryKey: ['feed'] })
+                refetch()
+              }}
+              className="feed-type-select text-sm text-gray-700"
+              aria-label="Feed type"
+            >
+              <option value="chronological">Timeline</option>
+              <option value="balanced">Balanced</option>
+            </select>
+            <span className="feed-type-caret" aria-hidden="true">
+              <svg
+                width="10"
+                height="6"
+                viewBox="0 0 10 6"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M1 1l4 4 4-4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span
+              ref={feedTypeMeasureRef}
+              className="feed-type-measure text-sm text-gray-700"
+              aria-hidden="true"
+            />
+          </div>
           {items.length === 0 && !isFetchingNextPage && (
             <div className="text-center py-12 text-gray-500">
               <p>No items in feed yet.</p>
               <p className="mt-2 text-sm">
-                Add Substack newsletters or add YouTube channels to get started.
+                Add Substack newsletters, YouTube channels, or Reddit subreddits to get started.
               </p>
             </div>
           )}
@@ -247,6 +333,7 @@ export default function FeedPage() {
               item={item}
               hideThumbnails={effectiveHideThumbnails}
               greyscaleThumbnails={serverGreyscaleThumbnails}
+              feedType={feedType}
             />
           ))}
 
@@ -261,20 +348,6 @@ export default function FeedPage() {
               </button>
             </div>
           )}
-          <div className="text-xs text-gray-400 flex items-center justify-center gap-2">
-            {isSyncing ? (
-              <>
-                <span className="inline-flex h-3 w-3 rounded-full border border-gray-400 border-t-transparent animate-spin" />
-                <span>Syncing…</span>
-              </>
-            ) : (
-              <span>
-                {lastSyncedAt
-                  ? `Last synced ${formatDistanceToNow(lastSyncedAt, { addSuffix: true })}`
-                  : 'Last synced never'}
-              </span>
-            )}
-          </div>
         </div>
       </main>
     </div>

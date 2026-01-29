@@ -17,7 +17,7 @@ export async function GET(
       where: {
         id,
         userId,
-        source: 'youtube',
+        source: 'reddit',
       },
       include: { bookmarks: { select: { id: true } } },
     })
@@ -28,7 +28,7 @@ export async function GET(
 
     return NextResponse.json({ item })
   } catch (error) {
-    console.error('YouTube item API error:', error)
+    console.error('Reddit item API error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

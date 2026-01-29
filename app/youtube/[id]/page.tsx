@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
+import { useToast } from '@/components/ui/use-toast'
 
 type YoutubeItem = {
   id: string
@@ -12,6 +13,7 @@ type YoutubeItem = {
   url: string
   sourceId?: string
   excerpt?: string | null
+  bookmarks?: Array<{ id: string }>
   rawPayload?: {
     snippet?: {
       description?: string
@@ -78,10 +80,30 @@ function linkifyText(text: string) {
 export default function YoutubePage() {
   const params = useParams<{ id: string }>()
   const id = params?.id
+  const searchParams = useSearchParams()
+  const fromBookmarks = searchParams.get('from') === 'bookmarks'
+  const backHref = fromBookmarks ? '/bookmarks' : '/'
+  const backLabel = fromBookmarks ? 'Back to Bookmarks' : 'Back to Feed'
   const [item, setItem] = useState<YoutubeItem | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const [isBookmarked, setIsBookmarked] = useState(false)
+  const { toast } = useToast()
+  const contentRef = useRef<HTMLDivElement | null>(null)
+
+  const videoId = useMemo(() => (item ? getYoutubeId(item) : null), [item])
+  const embedUrl = videoId
+    ? `https://www.youtube.com/embed/${videoId}?autoplay=0&controls=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1`
+    : null
+  const externalUrl = useMemo(() => (item?.url ? item.url : null), [item])
+  const descriptionText =
+    item?.rawPayload?.snippet?.description?.trim() || item?.excerpt?.trim() || null
+  const collapsedDescription = descriptionText
+    ? descriptionText.split(/\r?\n/).filter(Boolean).slice(0, 3).join('\n')
+    : null
+  const isDescriptionTruncated =
+    !!descriptionText && !!collapsedDescription && collapsedDescription.length < descriptionText.length
 
   useEffect(() => {
     const fetchItem = async () => {
@@ -99,6 +121,7 @@ export default function YoutubePage() {
         }
         const data = await res.json()
         setItem(data.item || null)
+        setIsBookmarked(Boolean(data?.item?.bookmarks?.length))
       } catch (error) {
         setHasError(true)
       } finally {
@@ -115,17 +138,14 @@ export default function YoutubePage() {
     }
   }, [id])
 
-  const videoId = useMemo(() => (item ? getYoutubeId(item) : null), [item])
-  const embedUrl = videoId
-    ? `https://www.youtube.com/embed/${videoId}?autoplay=0&controls=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1`
-    : null
-  const descriptionText =
-    item?.rawPayload?.snippet?.description?.trim() || item?.excerpt?.trim() || null
-  const collapsedDescription = descriptionText
-    ? descriptionText.split(/\r?\n/).filter(Boolean).slice(0, 3).join('\n')
-    : null
-  const isDescriptionTruncated =
-    !!descriptionText && !!collapsedDescription && collapsedDescription.length < descriptionText.length
+  useEffect(() => {
+    if (!contentRef.current) return
+    const links = contentRef.current.querySelectorAll<HTMLAnchorElement>('a[href]')
+    links.forEach((link) => {
+      link.setAttribute('target', '_blank')
+      link.setAttribute('rel', 'noreferrer')
+    })
+  }, [descriptionText, collapsedDescription, isDescriptionExpanded])
 
   if (isLoading) {
     return (
@@ -152,8 +172,8 @@ export default function YoutubePage() {
         <main className="max-w-[648px] mx-auto px-4 py-8">
           <div className="flex items-center gap-3 mb-4">
             <Link
-              href="/"
-              aria-label="Back to Feed"
+              href={backHref}
+              aria-label={backLabel}
               className="text-gray-600 hover:text-black transition-colors"
             >
               <svg
@@ -188,10 +208,11 @@ export default function YoutubePage() {
   return (
     <div className="min-h-screen bg-[#F5F5F5]">
       <main className="max-w-[648px] mx-auto px-4 py-8">
-        <div className="flex items-start gap-3 mb-4">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-start gap-3">
           <Link
-            href="/"
-            aria-label="Back to Feed"
+            href={backHref}
+            aria-label={backLabel}
             className="text-gray-600 hover:text-black transition-colors pt-1"
           >
             <svg
@@ -219,8 +240,101 @@ export default function YoutubePage() {
               <span>{new Date(item.publishedAt).toLocaleString()}</span>
             </div>
           </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            {externalUrl && (
+              <a
+                href={externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open on YouTube"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M14 4h6v6M20 4l-9 9"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </a>
+            )}
+            <button
+              type="button"
+              aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark item'}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              onClick={async () => {
+                if (!item?.id) return
+                try {
+                  if (isBookmarked) {
+                    await fetch('/api/bookmarks', {
+                      method: 'DELETE',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ feedItemId: item.id }),
+                    })
+                    setIsBookmarked(false)
+                  } else {
+                    await fetch('/api/bookmarks', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ feedItemId: item.id }),
+                    })
+                    setIsBookmarked(true)
+                    toast({ title: 'This item has been bookmarked' })
+                  }
+                } catch (error) {
+                  toast({ title: 'Bookmark failed', description: String(error) })
+                }
+              }}
+            >
+              {isBookmarked ? (
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
+                </svg>
+              ) : (
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
-        <article className="bg-white rounded-[8px] p-5">
+        <article className="bg-white rounded-[8px] p-5" ref={contentRef}>
           <div className="relative w-full overflow-hidden rounded-[8px] bg-black">
             <div className="pt-[56.25%]" />
             <iframe

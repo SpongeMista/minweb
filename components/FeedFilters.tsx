@@ -55,6 +55,16 @@ export default function FeedFilters({
         >
           YouTube
         </button>
+        <button
+          onClick={() => onSourceFilterChange('reddit')}
+          className={`px-4 py-2 border transition-colors ${
+            sourceFilter === 'reddit'
+              ? 'border-black bg-black text-white'
+              : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          Reddit
+        </button>
       </div>
     </div>
   )

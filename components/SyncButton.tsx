@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 
-async function syncFeeds(source?: 'substack' | 'youtube' | 'all') {
+async function syncFeeds(source?: 'substack' | 'youtube' | 'reddit' | 'all') {
   const res = await fetch('/api/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

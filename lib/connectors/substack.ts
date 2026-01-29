@@ -50,6 +50,38 @@ export class SubstackConnector extends BaseConnector {
     return allItems
   }
 
+  async backfill(userId: string, before: Date, cutoff: Date): Promise<FeedItem[]> {
+    const sources = await prisma.substackSource.findMany({
+      where: { userId },
+    })
+
+    if (sources.length === 0) {
+      return []
+    }
+
+    const allItems: FeedItem[] = []
+
+    for (const source of sources) {
+      try {
+        if (source.rssUrl) {
+          const items = await this.fetchFeedItems(source.rssUrl, source.publicationName)
+          const filtered = items.filter(
+            (item) => item.publishedAt < before && item.publishedAt >= cutoff
+          )
+          allItems.push(...filtered)
+        }
+      } catch (error) {
+        console.error(`Failed to backfill Substack source ${source.id}:`, error)
+      }
+    }
+
+    if (allItems.length > 0) {
+      await this.upsertFeedItems(userId, allItems)
+    }
+
+    return allItems
+  }
+
   private async fetchFeedItems(rssUrl: string, publicationName: string): Promise<FeedItem[]> {
     try {
       const feed = await parser.parseURL(rssUrl)

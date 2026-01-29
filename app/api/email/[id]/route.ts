@@ -18,8 +18,8 @@ export async function GET(
         id,
         userId,
         source: 'substack',
-        deletedAt: null,
       },
+      include: { bookmarks: { select: { id: true } } },
     })
 
     if (!item) {

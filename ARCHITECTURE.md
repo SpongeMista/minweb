@@ -110,7 +110,7 @@ FeedItem uses unique constraint: `(userId, source, sourceId)`
 
 ### Sync
 - `POST /api/sync`: Manual sync trigger
-  - Body: `{ source?: 'substack' | 'youtube' | 'all' }`
+- Body: `{ source?: 'substack' | 'youtube' | 'reddit' | 'all' }`
 
 ### Substack Management
 - `GET /api/substack`: List user's sources

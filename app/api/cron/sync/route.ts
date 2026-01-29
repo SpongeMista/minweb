@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { SubstackConnector } from '@/lib/connectors/substack'
 import { YouTubeConnector } from '@/lib/connectors/youtube'
+import { RedditConnector } from '@/lib/connectors/reddit'
 
 // Vercel Cron compatible route
 // Set up in vercel.json or use Vercel Cron dashboard
@@ -19,17 +20,25 @@ export async function GET(request: NextRequest) {
         OR: [
           { substackSources: { some: {} } },
           { youtubeConnection: { isNot: null } },
+          { redditConnection: { isNot: null } },
         ],
       },
     })
 
-    const results: { userId: string; substack: number; youtube: number; errors: string[] }[] = []
+    const results: {
+      userId: string
+      substack: number
+      youtube: number
+      reddit: number
+      errors: string[]
+    }[] = []
 
     for (const user of users) {
       const userResults = {
         userId: user.id,
         substack: 0,
         youtube: 0,
+        reddit: 0,
         errors: [] as string[],
       }
 
@@ -50,6 +59,24 @@ export async function GET(request: NextRequest) {
       } catch (error) {
         userResults.errors.push(`YouTube: ${String(error)}`)
       }
+
+      // Sync Reddit
+      try {
+        const redditConnector = new RedditConnector()
+        const redditItems = await redditConnector.sync(user.id)
+        userResults.reddit = redditItems.length
+      } catch (error) {
+        userResults.errors.push(`Reddit: ${String(error)}`)
+      }
+
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      await prisma.feedItem.deleteMany({
+        where: {
+          userId: user.id,
+          publishedAt: { lt: cutoff },
+          bookmarks: { none: {} },
+        },
+      })
 
       results.push(userResults)
     }
