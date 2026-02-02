@@ -185,11 +185,38 @@ export async function handleResendInbound(request: NextRequest) {
       // #endregion agent log
     }
 
+    const userId = await getDefaultUserId()
+    const senderEmail = parsedEmail.from?.trim().toLowerCase() || ''
+    if (senderEmail) {
+      const sender = await prisma.emailSender.upsert({
+        where: {
+          userId_email: {
+            userId,
+            email: senderEmail,
+          },
+        },
+        create: {
+          userId,
+          email: senderEmail,
+          name: parsedEmail.fromName || null,
+          status: 'allowed',
+        },
+        update: parsedEmail.fromName ? { name: parsedEmail.fromName } : {},
+      })
+
+      if (sender.status === 'blocked') {
+        await prisma.substackSource.update({
+          where: { id: source.id },
+          data: { lastSyncedAt: new Date() },
+        })
+        return NextResponse.json({ success: true, message: 'Blocked sender' })
+      }
+    }
+
     const feedItem = emailToFeedItem(parsedEmail, source.publicationName)
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H4',location:'lib/handlers/resend-inbound.ts:165',message:'feed item from email',data:{excerptLen:feedItem.excerpt?.length ?? 0,excerptHasTracking:(feedItem.excerpt || '').includes('eotrx.substackcdn.com/open?token='),thumbnailPresent:Boolean(feedItem.thumbnail)},timestamp:Date.now()})}).catch(()=>{});
     // #endregion agent log
-    const userId = await getDefaultUserId()
 
     await prisma.feedItem.upsert({
       where: {

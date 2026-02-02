@@ -127,6 +127,28 @@ async function fetchEmailAddress() {
   return res.json()
 }
 
+async function fetchEmailSenders() {
+  const res = await fetch('/api/settings/email-senders')
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to fetch email senders' }))
+    throw new Error(error.error || 'Failed to fetch email senders')
+  }
+  return res.json()
+}
+
+async function updateEmailSenderStatus(payload: { email: string; status: 'allowed' | 'blocked' }) {
+  const res = await fetch('/api/settings/email-senders', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to update sender status' }))
+    throw new Error(error.error || 'Failed to update sender status')
+  }
+  return res.json()
+}
+
 function YoutubeLogoIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -228,6 +250,37 @@ function RedditSubredditThumbnail({
       className={className}
       onError={() => setHasError(true)}
     />
+  )
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  disabled,
+  ariaLabel,
+}: {
+  checked: boolean
+  onChange: () => void
+  disabled?: boolean
+  ariaLabel: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      disabled={disabled}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+        checked ? 'bg-black' : 'bg-gray-300'
+      } disabled:cursor-not-allowed disabled:opacity-50`}
+      aria-label={ariaLabel}
+      aria-pressed={checked}
+    >
+      <span
+        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-1'
+        }`}
+      />
+    </button>
   )
 }
 
@@ -360,9 +413,31 @@ export default function SettingsPage() {
     },
   })
 
+  const navigateBack = () => {
+    if (window.history.length > 1) {
+      router.back()
+    } else {
+      router.push('/')
+    }
+  }
+
   const { data: emailData, error: emailError, isLoading: isEmailLoading } = useQuery({
     queryKey: ['substack-email'],
     queryFn: fetchEmailAddress,
+  })
+  const {
+    data: emailSendersData,
+    isLoading: isEmailSendersLoading,
+  } = useQuery({
+    queryKey: ['email-senders'],
+    queryFn: fetchEmailSenders,
+  })
+
+  const updateEmailSenderMutation = useMutation({
+    mutationFn: updateEmailSenderStatus,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email-senders'] })
+    },
   })
 
   const copyToClipboard = async (text: string) => {
@@ -427,6 +502,16 @@ export default function SettingsPage() {
     icon?: string | null
     sort?: 'new' | 'hot' | 'top'
   }[] = redditSubredditsData?.subreddits ?? []
+  const allowedEmailSenders: {
+    email: string
+    name?: string | null
+    status: 'allowed' | 'blocked'
+  }[] = emailSendersData?.allowed ?? []
+  const blockedEmailSenders: {
+    email: string
+    name?: string | null
+    status: 'allowed' | 'blocked'
+  }[] = emailSendersData?.blocked ?? []
 
   useEffect(() => {
     const query = youtubeQuery.trim()
@@ -523,7 +608,7 @@ export default function SettingsPage() {
                   greyscaleThumbnails,
                 },
                 {
-                  onSettled: () => router.push('/'),
+                  onSettled: navigateBack,
                 }
               )
             }}
@@ -709,9 +794,9 @@ export default function SettingsPage() {
                   <div className="my-4 h-px bg-gray-200" />
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-600">Hide YouTube Shorts</span>
-                    <button
-                      type="button"
-                      onClick={() => {
+                    <ToggleSwitch
+                      checked={hideYoutubeShorts}
+                      onChange={() => {
                         const nextValue = !hideYoutubeShorts
                         setHideYoutubeShorts(nextValue)
                         updateSettingsMutation.mutate({
@@ -720,17 +805,8 @@ export default function SettingsPage() {
                         })
                       }}
                       disabled={isYoutubeLoading}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        hideYoutubeShorts ? 'bg-black' : 'bg-gray-300'
-                      }`}
-                      aria-pressed={hideYoutubeShorts}
-                    >
-                      <span
-                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                          hideYoutubeShorts ? 'translate-x-5' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
+                      ariaLabel="Hide YouTube Shorts"
+                    />
                   </div>
                   <div className="mt-3 text-sm text-gray-600 flex items-center gap-2">
                     <span>Hide videos under</span>
@@ -964,55 +1040,35 @@ export default function SettingsPage() {
                     View thumbnails for all content on the feed.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
+                <ToggleSwitch
+                  checked={viewThumbnails}
+                  onChange={() => {
                     const nextViewThumbnails = !viewThumbnails
                     const nextHideThumbnails = !nextViewThumbnails
                     setViewThumbnails(nextViewThumbnails)
                     writeHideThumbnailsPreference(nextHideThumbnails)
                     updateSettingsMutation.mutate({ hideThumbnails: nextHideThumbnails })
                   }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    viewThumbnails ? 'bg-black' : 'bg-gray-300'
-                  }`}
-                  aria-label="View thumbnails"
-                  aria-pressed={viewThumbnails}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      viewThumbnails ? 'translate-x-5' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
+                  ariaLabel="View thumbnails"
+                />
               </div>
-              <div className="mt-4 flex items-start justify-between gap-4">
+              <div className="mt-4 flex items-start justify-between gap-4 pl-0">
                 <div>
-                  <p className="text-sm text-gray-600">Greyscale thumbnails</p>
+                  <p className="text-sm text-gray-600">Greyscale mode</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Turn thumbnails black and white to reduce distraction and excessive dopamine.
+                    Reduce distraction and excessive dopamine by switching everything on the app
+                    to black and white.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
+                <ToggleSwitch
+                  checked={greyscaleThumbnails}
+                  onChange={() => {
                     const nextValue = !greyscaleThumbnails
                     setGreyscaleThumbnails(nextValue)
                     updateSettingsMutation.mutate({ greyscaleThumbnails: nextValue })
                   }}
-                  disabled={!viewThumbnails}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    greyscaleThumbnails ? 'bg-black' : 'bg-gray-300'
-                  } ${viewThumbnails ? '' : 'cursor-not-allowed opacity-50'}`}
-                  aria-label="Greyscale thumbnails"
-                  aria-pressed={greyscaleThumbnails}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      greyscaleThumbnails ? 'translate-x-5' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
+                  ariaLabel="Greyscale mode"
+                />
               </div>
             </div>
           </section>
@@ -1041,6 +1097,99 @@ export default function SettingsPage() {
               {emailError && (
                 <p className="text-xs text-red-600 mt-2">{String(emailError)}</p>
               )}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Senders</p>
+                  <span className="text-xs text-gray-500">
+                    {allowedEmailSenders.length} sender
+                    {allowedEmailSenders.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {isEmailSendersLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : allowedEmailSenders.length > 0 ? (
+                  <div className="space-y-2">
+                    {allowedEmailSenders.map((sender) => (
+                      <div
+                        key={sender.email}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm text-gray-700 truncate block">
+                            {sender.name || sender.email}
+                          </span>
+                          {sender.name && (
+                            <span className="text-xs text-gray-500 truncate block">
+                              {sender.email}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateEmailSenderMutation.mutate({
+                              email: sender.email,
+                              status: 'blocked',
+                            })
+                          }
+                          disabled={updateEmailSenderMutation.isPending}
+                          className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                        >
+                          Block
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No senders yet.</p>
+                )}
+              </div>
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Blocked senders</p>
+                  <span className="text-xs text-gray-500">
+                    {blockedEmailSenders.length} blocked
+                  </span>
+                </div>
+                {isEmailSendersLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : blockedEmailSenders.length > 0 ? (
+                  <div className="space-y-2">
+                    {blockedEmailSenders.map((sender) => (
+                      <div
+                        key={sender.email}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm text-gray-700 truncate block">
+                            {sender.name || sender.email}
+                          </span>
+                          {sender.name && (
+                            <span className="text-xs text-gray-500 truncate block">
+                              {sender.email}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateEmailSenderMutation.mutate({
+                              email: sender.email,
+                              status: 'allowed',
+                            })
+                          }
+                          disabled={updateEmailSenderMutation.isPending}
+                          className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                        >
+                          Unblock
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No blocked senders.</p>
+                )}
+              </div>
             </div>
           </section>
         </div>

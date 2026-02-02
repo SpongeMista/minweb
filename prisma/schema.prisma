@@ -29,6 +29,8 @@ model User {
   bookmarks          UserBookmark[]
   feedItems          FeedItem[]
   settings           UserSettings?
+  emailSenders       EmailSender[]
+  feedItemNotes      FeedItemNote[]
 }
 
 model Account {
@@ -160,10 +162,42 @@ model FeedItem {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookmarks UserBookmark[]
+  notes     FeedItemNote[]
 
   @@unique([userId, source, sourceId])
   @@index([userId, publishedAt])
   @@index([userId, source])
+}
+
+model FeedItemNote {
+  id         String   @id @default(cuid())
+  userId     String
+  feedItemId String
+  body       String   @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedItem FeedItem @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([feedItemId])
+  @@index([userId, feedItemId])
+}
+
+model EmailSender {
+  id        String   @id @default(cuid())
+  userId    String
+  email     String
+  name      String?
+  status    String   @default("allowed")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+  @@index([userId, status])
 }
 
 model UserBookmark {

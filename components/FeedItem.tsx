@@ -132,6 +132,7 @@ export default function FeedItem({
     }
   }
   // #endregion agent log
+
   const restoreItem = async () => {
     if (!item.id) return
     const res = await fetch(`/api/feed/${item.id}`, { method: 'PATCH' })
@@ -301,13 +302,14 @@ export default function FeedItem({
               }
             }}
           >
-            <span className="mr-2 inline-flex">
+            <span className="mr-2 inline-flex" data-delete-item>
               <svg
+                data-delete-icon
                 viewBox="0 0 24 24"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
                 aria-hidden="true"
-                className="h-4 w-4"
+                className="h-4 w-4 no-greyscale"
               >
                 <path
                   d="M3 6h18"

@@ -110,3 +110,15 @@ select {
   overflow: hidden;
 }
 
+.greyscale-mode img,
+.greyscale-mode picture,
+.greyscale-mode video,
+.greyscale-mode iframe,
+.greyscale-mode canvas,
+.greyscale-mode svg {
+  filter: grayscale(100%);
+}
+
+.greyscale-mode .no-greyscale {
+  filter: none !important;
+}

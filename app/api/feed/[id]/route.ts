@@ -7,6 +7,9 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'app/api/feed/[id]/route.ts:9',message:'route params snapshot delete',data:{paramType:typeof params,hasThen:!!(params as any)?.then},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
     const userId = await getDefaultUserId()
     const pathnameId = request.nextUrl.pathname.split('/').pop() || ''
     const id = params?.id || pathnameId
@@ -42,6 +45,9 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'app/api/feed/[id]/route.ts:46',message:'route params snapshot patch',data:{paramType:typeof params,hasThen:!!(params as any)?.then},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
     const userId = await getDefaultUserId()
     const pathnameId = request.nextUrl.pathname.split('/').pop() || ''
     const id = params?.id || pathnameId
