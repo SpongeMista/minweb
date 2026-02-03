@@ -38,6 +38,7 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
   const [editingBody, setEditingBody] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(new Set())
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FeedItemNote | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -45,6 +46,8 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const ignoreNextEditBlurRef = useRef(false)
+  const latestNotesRef = useRef<FeedItemNote[]>([])
+  const latestActiveNoteIdRef = useRef<string | null>(null)
 
   const loadNotes = async () => {
     if (!feedItemId) return
@@ -89,6 +92,68 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
       resizeNoteTextarea()
     })
   }, [isAdding])
+
+  useEffect(() => {
+    if (notes.length === 0) {
+      if (activeNoteId !== null) {
+        setActiveNoteId(null)
+      }
+      return
+    }
+    if (!activeNoteId || !notes.some((note) => note.id === activeNoteId)) {
+      setActiveNoteId(notes[0].id)
+    }
+  }, [notes, activeNoteId])
+
+  useEffect(() => {
+    latestNotesRef.current = notes
+    latestActiveNoteIdRef.current = activeNoteId
+  }, [notes, activeNoteId])
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+      return target.isContentEditable
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const currentNotes = latestNotesRef.current
+      const currentActiveNoteId = latestActiveNoteIdRef.current
+      if (isEditableTarget(event.target)) return
+      if (event.key.toLowerCase() === 'n' && event.shiftKey) {
+        event.preventDefault()
+        setIsAdding(true)
+        return
+      }
+      if (event.key === 'Enter' && currentActiveNoteId) {
+        event.preventDefault()
+        const targetNote =
+          currentNotes.find((note) => note.id === currentActiveNoteId) ?? null
+        if (targetNote) {
+          startEditing(targetNote)
+        }
+        return
+      }
+      if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        currentActiveNoteId
+      ) {
+        event.preventDefault()
+        const targetNote =
+          currentNotes.find((note) => note.id === currentActiveNoteId) ?? null
+        if (targetNote) {
+          setDeleteTarget(targetNote)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
 
   useEffect(() => {
     if (!editingNoteId) return
@@ -214,17 +279,25 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
   }
 
   return (
-    <div className="bg-white rounded-[8px] p-5 shadow-sm border border-gray-100">
+    <div className="bg-white rounded-[8px] px-5 pt-3 pb-5 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between gap-3 mb-3">
         <h2 className="text-lg font-semibold text-black">Notes</h2>
         <span className="text-sm text-gray-400">{notes.length} notes</span>
       </div>
       <button
         type="button"
-        className="w-full mb-4 h-10 rounded-[8px] border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+        className="w-full mb-4 h-10 rounded-[8px] border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-4 px-4"
         onClick={() => setIsAdding(true)}
       >
-        + Add a new note
+        <span>+ Add a new note</span>
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 text-gray-500">
+            ⇧
+          </span>
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 text-gray-500">
+            N
+          </span>
+        </span>
       </button>
 
       {isAdding && (
@@ -274,11 +347,19 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
             const isEditing = editingNoteId === note.id
             const isExpanded = expandedNoteIds.has(note.id)
             const shouldTruncate = isLongNote(note) && !isExpanded
+            const isActive = activeNoteId === note.id
             return (
               <div
                 key={note.id}
                 className="border border-gray-100 rounded-[8px] p-3 relative"
+                onMouseEnter={() => setActiveNoteId(note.id)}
               >
+                {isActive && (
+                  <span
+                    className="absolute left-0 top-0 h-full w-1 bg-black rounded-l-[8px]"
+                    aria-hidden="true"
+                  />
+                )}
                 <div className="absolute right-2 top-2">
                   <DropdownMenu
                     open={menuOpenId === note.id}
@@ -314,7 +395,10 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
                           startEditing(note)
                         }}
                       >
-                        Edit
+                        <span className="flex-1">Edit</span>
+                        <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
+                          Enter
+                        </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="text-red-600 focus:text-red-600"
@@ -324,7 +408,10 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
                           setDeleteTarget(note)
                         }}
                       >
-                        Delete
+                        <span className="flex-1">Delete</span>
+                        <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
+                          Del
+                        </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

@@ -3,6 +3,7 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
+import { useRouter } from 'next/navigation'
 import FeedItem from '@/components/FeedItem'
 import {
   readHideThumbnailsPreference,
@@ -46,6 +47,7 @@ async function fetchSyncStatus() {
 
 export default function FeedPage() {
   const queryClient = useQueryClient()
+  const router = useRouter()
   const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
   const hasScrolledRef = useRef(false)
   const lastScrollYRef = useRef(0)
@@ -82,6 +84,7 @@ export default function FeedPage() {
   const effectiveHideThumbnails = localHideThumbnails ?? serverHideThumbnails
   const [feedType, setFeedType] = useState<'chronological' | 'balanced'>(serverFeedType)
   const feedTypeLabel = feedType === 'balanced' ? 'Balanced' : 'Timeline'
+  const [activeItemId, setActiveItemId] = useState<string | null>(null)
 
   useEffect(() => {
     const changeStamp = sessionStorage.getItem('settingsChangeStamp')
@@ -144,6 +147,99 @@ export default function FeedPage() {
   useEffect(() => {
     setFeedType(serverFeedType)
   }, [serverFeedType])
+
+  useEffect(() => {
+    if (items.length === 0) {
+      if (activeItemId !== null) {
+        setActiveItemId(null)
+      }
+      return
+    }
+    if (!activeItemId || !items.some((item) => item.id === activeItemId)) {
+      setActiveItemId(items[0].id)
+    }
+  }, [items, activeItemId])
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+      return target.isContentEditable
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return
+      if (items.length === 0) return
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const currentIndex = items.findIndex((item) => item.id === activeItemId)
+        const fallbackIndex = currentIndex === -1 ? 0 : currentIndex
+        const delta = event.key === 'ArrowDown' ? 1 : -1
+        const nextIndex = Math.min(
+          Math.max(fallbackIndex + delta, 0),
+          items.length - 1
+        )
+        setActiveItemId(items[nextIndex].id)
+        const target = document.querySelector<HTMLElement>(
+          `[data-feed-item-id="${items[nextIndex].id}"]`
+        )
+        if (target) {
+          const rect = target.getBoundingClientRect()
+          const header = document.querySelector<HTMLElement>('[data-app-header]')
+          const headerHeight = header?.offsetHeight ?? 0
+          const topBoundary = headerHeight + 8
+          const bottomBoundary = window.innerHeight - 8
+          const isFullyVisible = rect.top >= topBoundary && rect.bottom <= bottomBoundary
+          if (!isFullyVisible) {
+            target.scrollIntoView({ block: 'nearest' })
+            if (headerHeight) {
+              requestAnimationFrame(() => {
+                window.scrollBy(0, -headerHeight - 8)
+              })
+            }
+          }
+        }
+        return
+      }
+
+      if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        activeItemId
+      ) {
+        event.preventDefault()
+        window.dispatchEvent(
+          new CustomEvent('feed-item-delete', { detail: { id: activeItemId } })
+        )
+        return
+      }
+
+      if (event.key.toLowerCase() === 'b' && activeItemId) {
+        event.preventDefault()
+        window.dispatchEvent(
+          new CustomEvent('feed-item-bookmark', { detail: { id: activeItemId } })
+        )
+        return
+      }
+
+      if (event.key === 'Enter' && activeItemId) {
+        const target = document.querySelector<HTMLElement>(
+          `[data-feed-item-id="${activeItemId}"]`
+        )
+        const href = target?.getAttribute('data-detail-href')
+        if (href) {
+          event.preventDefault()
+          router.push(href)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [items, activeItemId])
 
   useLayoutEffect(() => {
     if (!feedTypeMeasureRef.current) return
@@ -334,6 +430,8 @@ export default function FeedPage() {
               hideThumbnails={effectiveHideThumbnails}
               greyscaleThumbnails={serverGreyscaleThumbnails}
               feedType={feedType}
+              isActive={activeItemId === item.id}
+              onHover={() => setActiveItemId(item.id)}
             />
           ))}
 

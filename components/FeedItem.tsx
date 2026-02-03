@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
@@ -44,6 +44,8 @@ interface FeedItemProps {
   greyscaleThumbnails?: boolean
   isBookmarksList?: boolean
   feedType?: 'chronological' | 'balanced'
+  isActive?: boolean
+  onHover?: () => void
 }
 
 export default function FeedItem({
@@ -52,6 +54,8 @@ export default function FeedItem({
   greyscaleThumbnails = false,
   isBookmarksList = false,
   feedType,
+  isActive = false,
+  onHover,
 }: FeedItemProps) {
   const timeAgo = formatDistanceToNow(new Date(item.publishedAt), { addSuffix: true })
   const isYoutube = item.source === 'youtube'
@@ -174,7 +178,7 @@ export default function FeedItem({
           </button>
         ),
       })
-      if (!isBookmarksList && feedType === 'balanced') {
+      if (!isBookmarksList) {
         queryClient.setQueryData(['feed'], (current: any) => {
           if (!current?.pages) return current
           const nextPages = current.pages.map((page: any) => ({
@@ -195,6 +199,20 @@ export default function FeedItem({
       setConfirmOpen(false)
     }
   }
+
+  useEffect(() => {
+    const handleDeleteEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ id?: string }>
+      if (customEvent.detail?.id === item.id) {
+        void deleteItem()
+      }
+    }
+
+    window.addEventListener('feed-item-delete', handleDeleteEvent as EventListener)
+    return () => {
+      window.removeEventListener('feed-item-delete', handleDeleteEvent as EventListener)
+    }
+  }, [item.id, deleteItem])
 
   const bookmarkItem = async () => {
     if (!item.id) return
@@ -237,6 +255,23 @@ export default function FeedItem({
       setMenuOpen(false)
     }
   }
+
+  useEffect(() => {
+    const handleBookmarkEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ id?: string }>
+      if (customEvent.detail?.id !== item.id) return
+      if (isBookmarksList) {
+        void removeBookmark()
+      } else {
+        void bookmarkItem()
+      }
+    }
+
+    window.addEventListener('feed-item-bookmark', handleBookmarkEvent as EventListener)
+    return () => {
+      window.removeEventListener('feed-item-bookmark', handleBookmarkEvent as EventListener)
+    }
+  }, [item.id, isBookmarksList, bookmarkItem, removeBookmark])
 
   const menu = (
     <div className="absolute right-3 top-3 z-10">
@@ -290,7 +325,10 @@ export default function FeedItem({
                 />
               </svg>
             </span>
-            {isBookmarksList ? 'Remove bookmark' : 'Bookmark'}
+            <span className="flex-1">{isBookmarksList ? 'Remove bookmark' : 'Bookmark'}</span>
+            <span className="ml-2 inline-flex min-w-[28px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
+              B
+            </span>
           </DropdownMenuItem>
           <DropdownMenuItem
             className="text-red-600 focus:text-red-600"
@@ -348,7 +386,10 @@ export default function FeedItem({
                 />
               </svg>
             </span>
-            Delete
+            <span className="flex-1">Delete</span>
+            <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
+              Del
+            </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -504,14 +545,32 @@ export default function FeedItem({
     </article>
   )
   const detailSuffix = isBookmarksList ? '?from=bookmarks' : ''
+  const detailHref = item.id
+    ? isYoutube
+      ? `/youtube/${item.id}${detailSuffix}`
+      : isReddit
+        ? `/reddit/${item.id}${detailSuffix}`
+        : `/email/${item.id}${detailSuffix}`
+    : null
 
   if (isYoutube) {
     return (
-      <div className="relative" data-feed-item-id={item.id}>
+      <div
+        className="relative"
+        data-feed-item-id={item.id}
+        data-detail-href={detailHref ?? undefined}
+        onMouseEnter={onHover}
+      >
+        {isActive && (
+          <span
+            className="absolute left-0 top-0 h-full w-1 bg-black rounded-l-[8px]"
+            aria-hidden="true"
+          />
+        )}
         {menu}
         {confirmDialog}
         <Link
-          href={`/youtube/${item.id}${detailSuffix}`}
+          href={detailHref ?? '#'}
           className="block no-underline"
           onClick={() => {
             if (!isBookmarksList) {
@@ -529,11 +588,22 @@ export default function FeedItem({
 
   if (isReddit) {
     return (
-      <div className="relative" data-feed-item-id={item.id}>
+      <div
+        className="relative"
+        data-feed-item-id={item.id}
+        data-detail-href={detailHref ?? undefined}
+        onMouseEnter={onHover}
+      >
+        {isActive && (
+          <span
+            className="absolute left-0 top-0 h-full w-1 bg-black rounded-l-[8px]"
+            aria-hidden="true"
+          />
+        )}
         {menu}
         {confirmDialog}
         <Link
-          href={`/reddit/${item.id}${detailSuffix}`}
+          href={detailHref ?? '#'}
           className="block no-underline"
           onClick={() => {
             if (!isBookmarksList) {
@@ -560,11 +630,22 @@ export default function FeedItem({
   }
 
   return (
-    <div className="relative" data-feed-item-id={item.id}>
+    <div
+      className="relative"
+      data-feed-item-id={item.id}
+      data-detail-href={detailHref ?? undefined}
+      onMouseEnter={onHover}
+    >
+      {isActive && (
+        <span
+          className="absolute left-0 top-0 h-full w-1 bg-black rounded-l-[8px]"
+          aria-hidden="true"
+        />
+      )}
       {menu}
       {confirmDialog}
       <Link
-      href={`/email/${item.id}${detailSuffix}`}
+      href={detailHref ?? '#'}
         className="block no-underline"
         onClick={() => {
         if (!isBookmarksList) {

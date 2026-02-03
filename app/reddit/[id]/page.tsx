@@ -162,6 +162,27 @@ export default function RedditPage() {
   }, [id])
 
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+      return target.isContentEditable
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (isEditableTarget(event.target)) return
+      event.preventDefault()
+      router.push(backHref)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [router, backHref])
+
+  useEffect(() => {
     if (!contentRef.current) return
     const links = contentRef.current.querySelectorAll<HTMLAnchorElement>('a[href]')
     links.forEach((link) => {

@@ -117,8 +117,6 @@ select {
 .greyscale-mode canvas,
 .greyscale-mode svg {
   filter: grayscale(100%);
-}
-
-.greyscale-mode .no-greyscale {
+}.greyscale-mode .no-greyscale {
   filter: none !important;
 }

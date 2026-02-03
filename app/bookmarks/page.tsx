@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -41,6 +41,7 @@ export default function BookmarksPage() {
   const greyscaleThumbnails = settingsData?.greyscaleThumbnails ?? false
   const initialHideThumbnails = readHideThumbnailsPreferenceSync()
   const [localHideThumbnails] = useHideThumbnailsPreference(initialHideThumbnails)
+  const [activeItemId, setActiveItemId] = useState<string | null>(null)
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -53,13 +54,94 @@ export default function BookmarksPage() {
     sessionStorage.removeItem('bookmarksRefreshStamp')
   }, [refetch])
 
+  useEffect(() => {
+    if (items.length === 0) {
+      if (activeItemId !== null) {
+        setActiveItemId(null)
+      }
+      return
+    }
+    if (!activeItemId || !items.some((item: any) => item.id === activeItemId)) {
+      setActiveItemId(items[0].id)
+    }
+  }, [items, activeItemId])
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+      return target.isContentEditable
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return
+      if (items.length === 0) return
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const currentIndex = items.findIndex((item: any) => item.id === activeItemId)
+        const fallbackIndex = currentIndex === -1 ? 0 : currentIndex
+        const delta = event.key === 'ArrowDown' ? 1 : -1
+        const nextIndex = Math.min(
+          Math.max(fallbackIndex + delta, 0),
+          items.length - 1
+        )
+        setActiveItemId(items[nextIndex].id)
+        const target = document.querySelector<HTMLElement>(
+          `[data-feed-item-id="${items[nextIndex].id}"]`
+        )
+        if (target) {
+          const rect = target.getBoundingClientRect()
+          const header = document.querySelector<HTMLElement>('[data-app-header]')
+          const headerHeight = header?.offsetHeight ?? 0
+          const topBoundary = headerHeight + 8
+          const bottomBoundary = window.innerHeight - 8
+          const isFullyVisible = rect.top >= topBoundary && rect.bottom <= bottomBoundary
+          if (!isFullyVisible) {
+            target.scrollIntoView({ block: 'nearest' })
+            if (headerHeight) {
+              requestAnimationFrame(() => {
+                window.scrollBy(0, -headerHeight - 8)
+              })
+            }
+          }
+        }
+        return
+      }
+
+      if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        activeItemId
+      ) {
+        event.preventDefault()
+        window.dispatchEvent(
+          new CustomEvent('feed-item-delete', { detail: { id: activeItemId } })
+        )
+        return
+      }
+
+      if (event.key === 'Enter' && activeItemId) {
+        const target = document.querySelector<HTMLElement>(
+          `[data-feed-item-id="${activeItemId}"]`
+        )
+        const href = target?.getAttribute('data-detail-href')
+        if (href) {
+          event.preventDefault()
+          router.push(href)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [items, activeItemId])
+
   const handleBackClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault()
-    if (window.history.length > 1) {
-      router.back()
-    } else {
-      router.push('/')
-    }
+    router.push('/')
   }
 
   return (
@@ -105,6 +187,8 @@ export default function BookmarksPage() {
                 hideThumbnails={localHideThumbnails ?? false}
                 greyscaleThumbnails={greyscaleThumbnails}
                 isBookmarksList
+                isActive={activeItemId === item.id}
+                onHover={() => setActiveItemId(item.id)}
               />
             ))}
           </div>
