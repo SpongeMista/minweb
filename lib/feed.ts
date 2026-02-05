@@ -6,9 +6,6 @@ export async function getFeed(
   params: PaginationParams
 ): Promise<PaginatedResponse<any>> {
   const limit = Math.min(params.limit || 10, 100) // Default 10 items per page, max 100
-  const shouldBalance =
-    params.feedType === 'balanced' &&
-    !params.source
 
   const baseWhere: any = {
     userId,
@@ -156,163 +153,16 @@ export async function getFeed(
         { publishedAt: 'desc' },
         { id: 'desc' }, // Secondary sort for consistent pagination
       ],
+      include: {
+        _count: {
+          select: {
+            bookmarks: true,
+            notes: true,
+          },
+        },
+      },
       take,
     })
-
-  const hashString = (value: string) => {
-    let hash = 0x811c9dc5
-    for (let i = 0; i < value.length; i += 1) {
-      hash ^= value.charCodeAt(i)
-      hash = Math.imul(hash, 0x01000193)
-      hash >>>= 0
-    }
-    return hash >>> 0
-  }
-
-  const mulberry32 = (seed: number) => {
-    let t = seed >>> 0
-    return () => {
-      t += 0x6d2b79f5
-      let r = t
-      r = Math.imul(r ^ (r >>> 15), r | 1)
-      r ^= r + Math.imul(r ^ (r >>> 7), r | 61)
-      return ((r ^ (r >>> 14)) >>> 0) / 4294967296
-    }
-  }
-
-  const shuffleDeterministic = <T>(items: T[], seedInput: string) => {
-    const output = [...items]
-    const rng = mulberry32(hashString(seedInput))
-    for (let i = output.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(rng() * (i + 1))
-      const temp = output[i]
-      output[i] = output[j]
-      output[j] = temp
-    }
-    return output
-  }
-
-  if (shouldBalance) {
-    const weights = {
-      youtube: 0.5,
-      reddit: 0.3,
-      substack: 0.2,
-    }
-
-    const rawQuotas = {
-      youtube: Math.floor(limit * weights.youtube),
-      reddit: Math.floor(limit * weights.reddit),
-      substack: Math.floor(limit * weights.substack),
-    }
-    const remainder = limit - (rawQuotas.youtube + rawQuotas.reddit + rawQuotas.substack)
-    const remainderOrder: Array<'youtube' | 'reddit' | 'substack'> = [
-      'youtube',
-      'reddit',
-      'substack',
-    ]
-    for (let i = 0; i < remainder; i += 1) {
-      const key = remainderOrder[i % remainderOrder.length]
-      rawQuotas[key] += 1
-    }
-
-    const getSourceCursor = (source: keyof PerSourceCursor) =>
-      parsedCursor.perSource?.[source] ?? parsedCursor.legacy ?? null
-    const buffer = 2
-    const [youtubeItems, redditItems, substackItems] = await Promise.all([
-      loadItems(
-        withCursor(cloneBaseWhere({ source: 'youtube' }), getSourceCursor('youtube')),
-        rawQuotas.youtube + buffer
-      ),
-      loadItems(
-        withCursor(cloneBaseWhere({ source: 'reddit' }), getSourceCursor('reddit')),
-        rawQuotas.reddit + buffer
-      ),
-      loadItems(
-        withCursor(cloneBaseWhere({ source: 'substack' }), getSourceCursor('substack')),
-        rawQuotas.substack + buffer
-      ),
-    ])
-
-    const pickWithQuota = (
-      items: any[],
-      target: number
-    ) => items.slice(0, Math.max(0, target))
-
-    const selected = [
-      ...pickWithQuota(youtubeItems, rawQuotas.youtube),
-      ...pickWithQuota(redditItems, rawQuotas.reddit),
-      ...pickWithQuota(substackItems, rawQuotas.substack),
-    ]
-
-    const selectedIds = new Set(selected.map((item) => item.id))
-    const pool = [
-      ...youtubeItems,
-      ...redditItems,
-      ...substackItems,
-    ].filter((item) => !selectedIds.has(item.id))
-
-    const merged = [...selected, ...pool].sort(
-      (a, b) =>
-        b.publishedAt.getTime() - a.publishedAt.getTime() ||
-        (a.id < b.id ? 1 : -1)
-    )
-
-    const resultItems = merged.slice(0, limit)
-    const shuffleSeed = `${userId}:${params.cursor ?? 'initial'}:${limit}`
-    const shuffledItems = shuffleDeterministic(resultItems, shuffleSeed)
-    const hasMoreBySource =
-      youtubeItems.length > rawQuotas.youtube ||
-      redditItems.length > rawQuotas.reddit ||
-      substackItems.length > rawQuotas.substack
-    const hasMore = merged.length > limit || hasMoreBySource
-
-    const getOldestBySource = (items: any[], source: 'youtube' | 'reddit' | 'substack') => {
-      return items
-        .filter((item) => item.source === source)
-        .reduce<CursorPoint | null>((oldest, current) => {
-          const currentPoint = {
-            ts: current.publishedAt.toISOString(),
-            id: current.id,
-          }
-          if (!oldest) return currentPoint
-          const oldestTime = new Date(oldest.ts).getTime()
-          const currentTime = new Date(currentPoint.ts).getTime()
-          if (currentTime < oldestTime) return currentPoint
-          if (currentTime > oldestTime) return oldest
-          return currentPoint.id < oldest.id ? currentPoint : oldest
-        }, null)
-    }
-
-    let nextCursor: string | null = null
-    if (hasMore) {
-      const nextPayload: PerSourceCursor = {
-        youtube:
-          getOldestBySource(resultItems, 'youtube') ??
-          parsedCursor.perSource?.youtube ??
-          parsedCursor.legacy ??
-          null,
-        reddit:
-          getOldestBySource(resultItems, 'reddit') ??
-          parsedCursor.perSource?.reddit ??
-          parsedCursor.legacy ??
-          null,
-        substack:
-          getOldestBySource(resultItems, 'substack') ??
-          parsedCursor.perSource?.substack ??
-          parsedCursor.legacy ??
-          null,
-      }
-      if (nextPayload.youtube || nextPayload.reddit || nextPayload.substack) {
-        nextCursor = Buffer.from(JSON.stringify(nextPayload)).toString('base64')
-      }
-    }
-
-    return {
-      items: shuffledItems,
-      nextCursor,
-      hasMore,
-    }
-  }
 
   const nonBalancedCursor =
     parsedCursor.legacy ?? getOldestCursor(parsedCursor.perSource)
@@ -323,6 +173,15 @@ export async function getFeed(
 
   const hasMore = items.length > limit
   const resultItems = hasMore ? items.slice(0, limit) : items
+  const mappedItems = resultItems.map((item: any) => {
+    const counts = item?._count ?? {}
+    const { _count, ...rest } = item
+    return {
+      ...rest,
+      bookmarkCount: counts.bookmarks ?? 0,
+      notesCount: counts.notes ?? 0,
+    }
+  })
 
   // Generate next cursor from last item
   let nextCursor: string | null = null
@@ -336,7 +195,7 @@ export async function getFeed(
   }
 
   return {
-    items: resultItems,
+    items: mappedItems,
     nextCursor,
     hasMore,
   }

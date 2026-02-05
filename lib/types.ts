@@ -46,7 +46,6 @@ export interface PaginationParams {
   shortsMinSeconds?: number
   youtubeChannelIds?: string[]
   redditSubreddits?: string[]
-  feedType?: 'chronological' | 'balanced'
 }
 
 export interface PaginatedResponse<T> {

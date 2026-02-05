@@ -1,7 +1,7 @@
 'use client'
 
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import FeedItem from '@/components/FeedItem'
@@ -23,9 +23,6 @@ async function fetchFeed(params: {
   const res = await fetch(`/api/feed?${queryParams}`)
   if (!res.ok) throw new Error('Failed to fetch feed')
   const data = await res.json()
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H8',location:'app/feed/page.tsx:23',message:'client feed substack summary',data:{total:data?.items?.length ?? 0,substackCount:(data?.items||[]).filter((item:any)=>item.source==='substack').length,substackSample:(data?.items||[]).filter((item:any)=>item.source==='substack').slice(0,3).map((item:any)=>({excerptHasTracking:typeof item.excerpt==='string'&&item.excerpt.includes('eotrx.substackcdn.com/open?token='),emailTextHasTracking:typeof item.emailText==='string'&&item.emailText.includes('eotrx.substackcdn.com/open?token='),thumbnailPresent:Boolean(item.thumbnail),thumbnailHost:(()=>{try{return item.thumbnail?new URL(item.thumbnail).host:null}catch{return null}})()}))},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
   return data
 }
 
@@ -51,10 +48,10 @@ export default function FeedPage() {
   const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
   const hasScrolledRef = useRef(false)
   const lastScrollYRef = useRef(0)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const pendingActiveRestoreRef = useRef<string | null>(null)
   const [syncInFlight, setSyncInFlight] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
-  const feedTypeMeasureRef = useRef<HTMLSpanElement | null>(null)
-  const [feedTypeSelectWidth, setFeedTypeSelectWidth] = useState<number | null>(null)
 
   const {
     data,
@@ -77,14 +74,28 @@ export default function FeedPage() {
   const items = data?.pages.flatMap((page) => page.items) || []
   const serverHideThumbnails = data?.pages[0]?.hideThumbnails ?? false
   const serverGreyscaleThumbnails = data?.pages[0]?.greyscaleThumbnails ?? false
-  const serverFeedType = data?.pages[0]?.feedType ?? 'balanced'
   const initialHideThumbnails = readHideThumbnailsPreferenceSync()
   const [localHideThumbnails, setLocalHideThumbnails] =
     useHideThumbnailsPreference(initialHideThumbnails)
   const effectiveHideThumbnails = localHideThumbnails ?? serverHideThumbnails
-  const [feedType, setFeedType] = useState<'chronological' | 'balanced'>(serverFeedType)
-  const feedTypeLabel = feedType === 'balanced' ? 'Balanced' : 'Timeline'
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const lastDeletedId = sessionStorage.getItem('lastDeletedId')
+    if (!lastDeletedId) return
+    queryClient.setQueryData(['feed'], (existing: any) => {
+      if (!existing?.pages) return existing
+      const nextPages = existing.pages.map((page: any) => {
+        if (!Array.isArray(page?.items)) return page
+        return {
+          ...page,
+          items: page.items.filter((item: any) => item.id !== lastDeletedId),
+        }
+      })
+      return { ...existing, pages: nextPages }
+    })
+    sessionStorage.removeItem('lastDeletedId')
+  }, [queryClient])
 
   useEffect(() => {
     const changeStamp = sessionStorage.getItem('settingsChangeStamp')
@@ -145,20 +156,43 @@ export default function FeedPage() {
   }, [localHideThumbnails, serverHideThumbnails])
 
   useEffect(() => {
-    setFeedType(serverFeedType)
-  }, [serverFeedType])
-
-  useEffect(() => {
     if (items.length === 0) {
       if (activeItemId !== null) {
         setActiveItemId(null)
       }
       return
     }
+    const nextFromDelete = sessionStorage.getItem('feedActiveAfterDelete')
+    if (nextFromDelete && items.some((item) => item.id === nextFromDelete)) {
+      setActiveItemId(nextFromDelete)
+      pendingActiveRestoreRef.current = nextFromDelete
+      return
+    }
+    const nextFromBack = sessionStorage.getItem('feedActiveAfterBack')
+    if (nextFromBack && items.some((item) => item.id === nextFromBack)) {
+      setActiveItemId(nextFromBack)
+      pendingActiveRestoreRef.current = nextFromBack
+      return
+    }
+    if (pendingActiveRestoreRef.current) {
+      return
+    }
     if (!activeItemId || !items.some((item) => item.id === activeItemId)) {
       setActiveItemId(items[0].id)
     }
   }, [items, activeItemId])
+
+  useEffect(() => {
+    if (!pendingActiveRestoreRef.current || !activeItemId) return
+    if (pendingActiveRestoreRef.current !== activeItemId) return
+    if (sessionStorage.getItem('feedActiveAfterDelete') === activeItemId) {
+      sessionStorage.removeItem('feedActiveAfterDelete')
+    }
+    if (sessionStorage.getItem('feedActiveAfterBack') === activeItemId) {
+      sessionStorage.removeItem('feedActiveAfterBack')
+    }
+    pendingActiveRestoreRef.current = null
+  }, [activeItemId])
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -195,9 +229,7 @@ export default function FeedPage() {
           if (!isFullyVisible) {
             target.scrollIntoView({ block: 'nearest' })
             if (headerHeight) {
-              requestAnimationFrame(() => {
-                window.scrollBy(0, -headerHeight - 8)
-              })
+              window.scrollBy(0, -headerHeight - 8)
             }
           }
         }
@@ -209,6 +241,13 @@ export default function FeedPage() {
         activeItemId
       ) {
         event.preventDefault()
+        const currentIndex = items.findIndex((item) => item.id === activeItemId)
+        const nextCandidate =
+          currentIndex > -1 ? items[currentIndex + 1] ?? items[currentIndex - 1] : null
+        if (nextCandidate?.id) {
+          setActiveItemId(nextCandidate.id)
+          sessionStorage.setItem('feedActiveAfterDelete', nextCandidate.id)
+        }
         window.dispatchEvent(
           new CustomEvent('feed-item-delete', { detail: { id: activeItemId } })
         )
@@ -229,6 +268,9 @@ export default function FeedPage() {
         )
         const href = target?.getAttribute('data-detail-href')
         if (href) {
+          sessionStorage.setItem('feedScrollOverride', '1')
+          sessionStorage.setItem('feedScrollY', String(window.scrollY))
+          sessionStorage.setItem('feedRestoreKey', activeItemId)
           event.preventDefault()
           router.push(href)
         }
@@ -240,15 +282,6 @@ export default function FeedPage() {
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [items, activeItemId])
-
-  useLayoutEffect(() => {
-    if (!feedTypeMeasureRef.current) return
-    feedTypeMeasureRef.current.textContent = feedTypeLabel
-    const textWidth = feedTypeMeasureRef.current.getBoundingClientRect().width
-    if (Number.isFinite(textWidth) && textWidth > 0) {
-      setFeedTypeSelectWidth(Math.ceil(textWidth))
-    }
-  }, [feedTypeLabel])
 
   useEffect(() => {
     const saved = sessionStorage.getItem('feedScrollY')
@@ -322,6 +355,26 @@ export default function FeedPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target) return
+    if (!hasNextPage) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return
+          if (!hasNextPage || isFetchingNextPage) return
+          void fetchNextPage()
+        })
+      },
+      { rootMargin: '200px 0px', threshold: 0 }
+    )
+    observer.observe(target)
+    return () => {
+      observer.disconnect()
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage])
+
   // Auto-sync on page load if stale
   useEffect(() => {
     const SYNC_THRESHOLD_MS = 60 * 1000
@@ -364,56 +417,6 @@ export default function FeedPage() {
     <div className="min-h-screen bg-[#F5F5F5]">
       <main className="max-w-[648px] mx-auto px-4 py-8">
         <div className="space-y-4">
-          <div className="feed-type-control">
-            <span
-              className="feed-type-label text-sm text-gray-700"
-              style={feedTypeSelectWidth ? { minWidth: `${feedTypeSelectWidth}px` } : undefined}
-              aria-hidden="true"
-            >
-              {feedTypeLabel}
-            </span>
-            <select
-              value={feedType}
-              onChange={async (event) => {
-                const nextValue = event.target.value as 'chronological' | 'balanced'
-                setFeedType(nextValue)
-                await fetch('/api/settings', {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ feedType: nextValue }),
-                })
-                queryClient.invalidateQueries({ queryKey: ['feed'] })
-                refetch()
-              }}
-              className="feed-type-select text-sm text-gray-700"
-              aria-label="Feed type"
-            >
-              <option value="chronological">Timeline</option>
-              <option value="balanced">Balanced</option>
-            </select>
-            <span className="feed-type-caret" aria-hidden="true">
-              <svg
-                width="10"
-                height="6"
-                viewBox="0 0 10 6"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M1 1l4 4 4-4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-            <span
-              ref={feedTypeMeasureRef}
-              className="feed-type-measure text-sm text-gray-700"
-              aria-hidden="true"
-            />
-          </div>
           {items.length === 0 && !isFetchingNextPage && (
             <div className="text-center py-12 text-gray-500">
               <p>No items in feed yet.</p>
@@ -429,22 +432,13 @@ export default function FeedPage() {
               item={item}
               hideThumbnails={effectiveHideThumbnails}
               greyscaleThumbnails={serverGreyscaleThumbnails}
-              feedType={feedType}
               isActive={activeItemId === item.id}
               onHover={() => setActiveItemId(item.id)}
             />
           ))}
-
-          {hasNextPage && (
-            <div className="text-center py-8">
-              <button
-                onClick={() => fetchNextPage()}
-                disabled={isFetchingNextPage}
-                className="px-6 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                {isFetchingNextPage ? 'Loading...' : 'Load More'}
-              </button>
-            </div>
+          <div ref={loadMoreRef} className="h-8" />
+          {isFetchingNextPage && (
+            <div className="text-center py-6 text-gray-500">Loading...</div>
           )}
         </div>
       </main>

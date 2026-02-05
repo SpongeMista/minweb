@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +30,7 @@ type NotesPanelProps = {
 }
 
 export default function NotesPanel({ feedItemId }: NotesPanelProps) {
+  const queryClient = useQueryClient()
   const [notes, setNotes] = useState<FeedItemNote[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
@@ -48,6 +50,41 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
   const ignoreNextEditBlurRef = useRef(false)
   const latestNotesRef = useRef<FeedItemNote[]>([])
   const latestActiveNoteIdRef = useRef<string | null>(null)
+
+  const updateFeedCounts = (updater: (item: any) => any) => {
+    queryClient.setQueryData(['feed'], (current: any) => {
+      if (!current?.pages) return current
+      const nextPages = current.pages.map((page: any) => ({
+        ...page,
+        items: Array.isArray(page.items)
+          ? page.items.map((pageItem: any) =>
+              pageItem?.id === feedItemId ? updater(pageItem) : pageItem
+            )
+          : page.items,
+      }))
+      return { ...current, pages: nextPages }
+    })
+  }
+
+  const updateBookmarksCounts = (updater: (item: any) => any) => {
+    queryClient.setQueryData(['bookmarks'], (current: any) => {
+      if (!Array.isArray(current?.items)) return current
+      return {
+        ...current,
+        items: current.items.map((bookmarkItem: any) =>
+          bookmarkItem?.id === feedItemId ? updater(bookmarkItem) : bookmarkItem
+        ),
+      }
+    })
+  }
+
+  const applyNotesDelta = (item: any, delta: number) => {
+    const nextCount = Math.max(0, (item?.notesCount ?? 0) + delta)
+    return {
+      ...item,
+      notesCount: nextCount,
+    }
+  }
 
   const loadNotes = async () => {
     if (!feedItemId) return
@@ -182,6 +219,8 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
       const data = await res.json()
       if (data?.note) {
         setNotes((prev) => [data.note as FeedItemNote, ...prev])
+        updateFeedCounts((item) => applyNotesDelta(item, 1))
+        updateBookmarksCounts((item) => applyNotesDelta(item, 1))
       } else {
         await loadNotes()
       }
@@ -264,6 +303,8 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
         cancelEditing()
       }
       setNotes((prev) => prev.filter((note) => note.id !== deleteTarget.id))
+      updateFeedCounts((item) => applyNotesDelta(item, -1))
+      updateBookmarksCounts((item) => applyNotesDelta(item, -1))
       setExpandedNoteIds((prev) => {
         if (!prev.has(deleteTarget.id)) return prev
         const next = new Set(prev)

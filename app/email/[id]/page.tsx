@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
@@ -41,6 +42,7 @@ export default function EmailPage() {
   const [isBookmarked, setIsBookmarked] = useState(false)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const queryClient = useQueryClient()
   const { toast } = useToast()
   const contentRef = useRef<HTMLDivElement | null>(null)
 
@@ -81,6 +83,11 @@ export default function EmailPage() {
   }, [id])
 
   useEffect(() => {
+    if (!item?.id || fromBookmarks) return
+    sessionStorage.setItem('feedActiveAfterBack', item.id)
+  }, [item?.id, fromBookmarks])
+
+  useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false
       const tag = target.tagName
@@ -89,17 +96,32 @@ export default function EmailPage() {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
       if (isEditableTarget(event.target)) return
-      event.preventDefault()
-      router.push(backHref)
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        router.push(backHref)
+        return
+      }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault()
+        if (!item?.id) return
+        const feedData = queryClient.getQueryData(['feed']) as any
+        const feedItems = feedData?.pages?.flatMap((page: any) => page.items) ?? []
+        const currentIndex = feedItems.findIndex((entry: any) => entry?.id === item.id)
+        const nextItem =
+          currentIndex > -1 ? feedItems[currentIndex + 1] ?? feedItems[currentIndex - 1] : null
+        if (nextItem?.id) {
+          sessionStorage.setItem('feedActiveAfterDelete', nextItem.id)
+        }
+        void deleteItem()
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [router, backHref])
+  }, [router, backHref, item?.id, queryClient])
 
   useEffect(() => {
     if (!contentRef.current) return
@@ -110,19 +132,63 @@ export default function EmailPage() {
     })
   }, [item?.emailHtml, item?.emailText, item?.excerpt])
 
+  const updateFeedCache = (updater: (pageItem: any) => any) => {
+    queryClient.setQueryData(['feed'], (current: any) => {
+      if (!current?.pages) return current
+      const nextPages = current.pages.map((page: any) => ({
+        ...page,
+        items: Array.isArray(page.items) ? page.items.map(updater).filter(Boolean) : page.items,
+      }))
+      return { ...current, pages: nextPages }
+    })
+  }
+
+  const updateBookmarksCache = (updater: (items: any[]) => any[]) => {
+    queryClient.setQueryData(['bookmarks'], (current: any) => {
+      if (!Array.isArray(current?.items)) return current
+      return { ...current, items: updater(current.items) }
+    })
+  }
+
   const deleteItem = async () => {
     if (!item?.id) return
+    const previousFeed = queryClient.getQueryData(['feed'])
+    const previousBookmarks = queryClient.getQueryData(['bookmarks'])
+    const restoreCaches = () => {
+      if (previousFeed) queryClient.setQueryData(['feed'], previousFeed)
+      if (previousBookmarks) queryClient.setQueryData(['bookmarks'], previousBookmarks)
+    }
+    updateFeedCache((pageItem) => (pageItem?.id === item.id ? null : pageItem))
+    if (fromBookmarks) {
+      updateBookmarksCache((items) => items.filter((bookmarkItem: any) => bookmarkItem?.id !== item.id))
+    }
     setIsDeleting(true)
     try {
+      if (fromBookmarks) {
+        const unbookmarkRes = await fetch('/api/bookmarks', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedItemId: item.id, restoreFeedItem: false }),
+        })
+        if (!unbookmarkRes.ok) {
+          throw new Error('Failed to remove bookmark')
+        }
+      }
       const res = await fetch(`/api/feed/${item.id}`, {
         method: 'DELETE',
       })
       if (!res.ok) {
         throw new Error('Failed to delete item')
       }
+      sessionStorage.setItem(
+        'lastDeletedSource',
+        fromBookmarks ? 'bookmarks-detail' : 'feed-detail'
+      )
+      sessionStorage.setItem('lastDeletedId', item.id)
       toast({ title: 'Item deleted' })
       router.push(backHref)
     } catch (error) {
+      restoreCaches()
       toast({ title: 'Delete failed', description: String(error) })
     } finally {
       setIsDeleting(false)
@@ -255,24 +321,50 @@ export default function EmailPage() {
                   className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
                   onClick={async () => {
                     if (!item?.id) return
+                    const nextIsBookmarked = !isBookmarked
+                    const previousFeed = queryClient.getQueryData(['feed'])
+                    const previousBookmarks = queryClient.getQueryData(['bookmarks'])
+                    setIsBookmarked(nextIsBookmarked)
+                    if (nextIsBookmarked) {
+                      updateBookmarksCache((items) => {
+                        if (items.some((bookmarkItem: any) => bookmarkItem?.id === item.id)) return items
+                        return [item, ...items]
+                      })
+                    } else {
+                      updateBookmarksCache((items) =>
+                        items.filter((bookmarkItem: any) => bookmarkItem?.id !== item.id)
+                      )
+                    }
+                    updateFeedCache((pageItem) => {
+                      if (pageItem?.id !== item.id) return pageItem
+                      return {
+                        ...pageItem,
+                        bookmarks: nextIsBookmarked ? [{ id: 'optimistic' }] : [],
+                      }
+                    })
                     try {
-                      if (isBookmarked) {
+                      if (!nextIsBookmarked) {
                         await fetch('/api/bookmarks', {
                           method: 'DELETE',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ feedItemId: item.id }),
                         })
-                        setIsBookmarked(false)
                       } else {
                         await fetch('/api/bookmarks', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ feedItemId: item.id }),
                         })
-                        setIsBookmarked(true)
                         toast({ title: 'This item has been bookmarked' })
                       }
                     } catch (error) {
+                      setIsBookmarked(!nextIsBookmarked)
+                      if (previousFeed) {
+                        queryClient.setQueryData(['feed'], previousFeed)
+                      }
+                      if (previousBookmarks) {
+                        queryClient.setQueryData(['bookmarks'], previousBookmarks)
+                      }
                       toast({ title: 'Bookmark failed', description: String(error) })
                     }
                   }}

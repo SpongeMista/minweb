@@ -1,11 +1,21 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import FeedItem from '@/components/FeedItem'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   readHideThumbnailsPreferenceSync,
   useHideThumbnailsPreference,
@@ -25,6 +35,7 @@ async function fetchSettings() {
 
 export default function BookmarksPage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['bookmarks'],
     queryFn: fetchBookmarks,
@@ -42,6 +53,8 @@ export default function BookmarksPage() {
   const initialHideThumbnails = readHideThumbnailsPreferenceSync()
   const [localHideThumbnails] = useHideThumbnailsPreference(initialHideThumbnails)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -65,6 +78,21 @@ export default function BookmarksPage() {
       setActiveItemId(items[0].id)
     }
   }, [items, activeItemId])
+
+  useEffect(() => {
+    const lastDeletedId = sessionStorage.getItem('lastDeletedId')
+    const lastDeletedSource = sessionStorage.getItem('lastDeletedSource')
+    if (!lastDeletedId || lastDeletedSource !== 'bookmarks-detail') return
+    queryClient.setQueryData(['bookmarks'], (current: any) => {
+      if (!Array.isArray(current?.items)) return current
+      return {
+        ...current,
+        items: current.items.filter((bookmarkItem: any) => bookmarkItem?.id !== lastDeletedId),
+      }
+    })
+    sessionStorage.removeItem('lastDeletedId')
+    sessionStorage.removeItem('lastDeletedSource')
+  }, [items, isLoading, queryClient])
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -115,9 +143,8 @@ export default function BookmarksPage() {
         activeItemId
       ) {
         event.preventDefault()
-        window.dispatchEvent(
-          new CustomEvent('feed-item-delete', { detail: { id: activeItemId } })
-        )
+        setPendingDeleteId(activeItemId)
+        setConfirmDeleteOpen(true)
         return
       }
 
@@ -196,6 +223,38 @@ export default function BookmarksPage() {
           <p className="text-sm text-gray-500">No bookmarks yet.</p>
         )}
       </main>
+      <AlertDialog
+        open={confirmDeleteOpen}
+        onOpenChange={(open) => {
+          setConfirmDeleteOpen(open)
+          if (!open) {
+            setPendingDeleteId(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete bookmark</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the item from your bookmarks.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingDeleteId) return
+                window.dispatchEvent(
+                  new CustomEvent('feed-item-delete', { detail: { id: pendingDeleteId } })
+                )
+                setPendingDeleteId(null)
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -633,6 +633,363 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-semibold text-black">Settings</h1>
         </div>
         <div className="space-y-4">
+          {/* General */}
+          <section>
+            <div className="bg-white rounded-[8px] p-5">
+              <h2 className="text-lg font-semibold mb-4">General</h2>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">View thumbnails</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    View thumbnails for all content on the feed.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={viewThumbnails}
+                  onChange={() => {
+                    const nextViewThumbnails = !viewThumbnails
+                    const nextHideThumbnails = !nextViewThumbnails
+                    setViewThumbnails(nextViewThumbnails)
+                    writeHideThumbnailsPreference(nextHideThumbnails)
+                    updateSettingsMutation.mutate({ hideThumbnails: nextHideThumbnails })
+                  }}
+                  ariaLabel="View thumbnails"
+                />
+              </div>
+              <div className="mt-4 flex items-start justify-between gap-4 pl-0">
+                <div>
+                  <p className="text-sm text-gray-600">Greyscale mode</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Reduce distraction and excessive dopamine by switching everything on the app
+                    to black and white.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={greyscaleThumbnails}
+                  onChange={() => {
+                    const nextValue = !greyscaleThumbnails
+                    setGreyscaleThumbnails(nextValue)
+                    updateSettingsMutation.mutate({ greyscaleThumbnails: nextValue })
+                  }}
+                  ariaLabel="Greyscale mode"
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Email Newsletters */}
+          <section>
+            <div className="bg-white rounded-[8px] p-5">
+              <h2 className="text-lg font-semibold mb-4">Email Newsletters</h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Use this email that we have generated to subscribe to newsletters that you want to show up in your feed.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-gray-100 px-2 py-1 rounded border border-gray-300">
+                  {isEmailLoading ? 'Loading...' : emailData?.email || 'Email not available'}
+                </code>
+                <button
+                  onClick={() => {
+                    if (emailData?.email) copyToClipboard(emailData.email)
+                  }}
+                  disabled={!emailData?.email}
+                  className="px-3 py-1 min-w-[64px] border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                >
+                  {isEmailCopied ? '✓' : 'Copy'}
+                </button>
+              </div>
+              {emailError && (
+                <p className="text-xs text-red-600 mt-2">{String(emailError)}</p>
+              )}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Senders</p>
+                  <span className="text-xs text-gray-500">
+                    {allowedEmailSenders.length} sender
+                    {allowedEmailSenders.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {isEmailSendersLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : allowedEmailSenders.length > 0 ? (
+                  <div className="space-y-2">
+                    {allowedEmailSenders.map((sender) => (
+                      <div
+                        key={sender.email}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm text-gray-700 truncate block">
+                            {sender.name || sender.email}
+                          </span>
+                          {sender.name && (
+                            <span className="text-xs text-gray-500 truncate block">
+                              {sender.email}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateEmailSenderMutation.mutate({
+                              email: sender.email,
+                              status: 'blocked',
+                            })
+                          }
+                          disabled={updateEmailSenderMutation.isPending}
+                          className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                        >
+                          Block
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No senders yet.</p>
+                )}
+              </div>
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Blocked senders</p>
+                  <span className="text-xs text-gray-500">
+                    {blockedEmailSenders.length} blocked
+                  </span>
+                </div>
+                {isEmailSendersLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : blockedEmailSenders.length > 0 ? (
+                  <div className="space-y-2">
+                    {blockedEmailSenders.map((sender) => (
+                      <div
+                        key={sender.email}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm text-gray-700 truncate block">
+                            {sender.name || sender.email}
+                          </span>
+                          {sender.name && (
+                            <span className="text-xs text-gray-500 truncate block">
+                              {sender.email}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateEmailSenderMutation.mutate({
+                              email: sender.email,
+                              status: 'allowed',
+                            })
+                          }
+                          disabled={updateEmailSenderMutation.isPending}
+                          className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                        >
+                          Unblock
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No blocked senders.</p>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Reddit Connection */}
+          <section>
+            <div className="bg-white rounded-[8px] p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Reddit</h2>
+                <span className="text-sm text-gray-500">
+                  {redditSubreddits.length} subreddit{redditSubreddits.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                Search and add public subreddits to sync into your feed.
+              </p>
+              <div className="relative" ref={redditSearchContainerRef}>
+                <input
+                  type="text"
+                  value={redditQuery}
+                  onChange={(event) => {
+                    const nextQuery = event.target.value
+                    setRedditQuery(nextQuery)
+                    setIsRedditSearchOpen(nextQuery.trim().length >= 2)
+                  }}
+                  onKeyDown={(event) => {
+                    if (redditResults.length === 0) return
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault()
+                      setRedditHighlightedIndex((prev) =>
+                        prev < redditResults.length - 1 ? prev + 1 : 0
+                      )
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      setRedditHighlightedIndex((prev) =>
+                        prev > 0 ? prev - 1 : redditResults.length - 1
+                      )
+                    } else if (event.key === 'Enter') {
+                      event.preventDefault()
+                      const selected = redditResults[redditHighlightedIndex]
+                      if (!selected) return
+                      const alreadyAdded = redditSubreddits.some(
+                        (subreddit) =>
+                          subreddit.subreddit.toLowerCase() === selected.subreddit.toLowerCase()
+                      )
+                      if (alreadyAdded) return
+                      addSubredditMutation.mutate({
+                        subreddit: selected.subreddit,
+                        title: selected.title,
+                        icon: selected.icon,
+                      })
+                      setRedditQuery('')
+                      setRedditResults([])
+                      setRedditHighlightedIndex(-1)
+                      setIsRedditSearchOpen(false)
+                    } else if (event.key === 'Escape') {
+                      setIsRedditSearchOpen(false)
+                      setRedditResults([])
+                      setRedditHighlightedIndex(-1)
+                    }
+                  }}
+                  placeholder="Search subreddits"
+                  className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                />
+                {isRedditSearchOpen &&
+                  (isRedditSearching ||
+                    redditResults.length > 0 ||
+                    redditQuery.trim().length >= 2) && (
+                    <div className="absolute z-10 mt-2 w-full rounded-[8px] border border-gray-200 bg-white shadow-sm">
+                      {isRedditSearching ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">Searching...</div>
+                      ) : redditResults.length > 0 ? (
+                        <div className="max-h-64 overflow-y-auto">
+                          {redditResults.map((result, index) => {
+                            const alreadyAdded = redditSubreddits.some(
+                              (subreddit) =>
+                                subreddit.subreddit.toLowerCase() === result.subreddit.toLowerCase()
+                            )
+                            return (
+                              <button
+                                key={result.subreddit}
+                                type="button"
+                                onClick={() => {
+                                  if (alreadyAdded) return
+                                  addSubredditMutation.mutate({
+                                    subreddit: result.subreddit,
+                                    title: result.title,
+                                    icon: result.icon,
+                                  })
+                                  setRedditQuery('')
+                                  setRedditResults([])
+                                  setRedditHighlightedIndex(-1)
+                                  setIsRedditSearchOpen(false)
+                                }}
+                                disabled={alreadyAdded || addSubredditMutation.isPending}
+                                className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50 ${
+                                  redditHighlightedIndex === index ? 'bg-gray-50' : ''
+                                }`}
+                              >
+                                <RedditSubredditThumbnail
+                                  src={result.icon}
+                                  className="h-8 w-8 rounded-full object-cover"
+                                />
+                                <div className="min-w-0">
+                                  <span className="text-sm text-gray-700 truncate block">
+                                    r/{result.subreddit}
+                                  </span>
+                                  <span className="text-xs text-gray-500 truncate block">
+                                    {result.title}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-gray-500">No results.</div>
+                      )}
+                    </div>
+                  )}
+              </div>
+              {redditSearchError && (
+                <p className="text-xs text-red-600 mt-2">{redditSearchError}</p>
+              )}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-700">Your subreddits</p>
+                  {redditStatus?.lastSyncedAt && (
+                    <p className="text-xs text-gray-500">
+                      Last synced: {new Date(redditStatus.lastSyncedAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                {isRedditSubredditsLoading ? (
+                  <div className="h-4 w-40 bg-gray-100 rounded" />
+                ) : redditSubreddits.length > 0 ? (
+                  <div className="space-y-2">
+                    {redditSubreddits.map((subreddit) => (
+                      <div
+                        key={subreddit.subreddit}
+                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <RedditSubredditThumbnail
+                            src={subreddit.icon}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                          <div className="min-w-0">
+                            <span className="text-sm text-gray-700 truncate block">
+                              r/{subreddit.subreddit}
+                            </span>
+                            <span className="text-xs text-gray-500 truncate block">
+                              {subreddit.title}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">Sort by:</span>
+                          <select
+                            value={subreddit.sort ?? 'new'}
+                            onChange={(event) => {
+                              const nextValue = event.target.value as 'new' | 'hot' | 'top'
+                              addSubredditMutation.mutate({
+                                subreddit: subreddit.subreddit,
+                                title: subreddit.title,
+                                icon: subreddit.icon,
+                                sort: nextValue,
+                              })
+                            }}
+                            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+                          >
+                            <option value="new">New</option>
+                            <option value="hot">Hot</option>
+                            <option value="top">Top</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removeSubredditMutation.mutate({ subreddit: subreddit.subreddit })
+                            }
+                            disabled={removeSubredditMutation.isPending}
+                            className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No subreddits added yet.</p>
+                )}
+              </div>
+
+            </div>
+          </section>
+
           {/* YouTube Connection */}
           <section>
             <div className="bg-white rounded-[8px] p-5">
@@ -833,363 +1190,6 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
-            </div>
-          </section>
-
-          {/* Reddit Connection */}
-          <section>
-            <div className="bg-white rounded-[8px] p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">Reddit</h2>
-                <span className="text-sm text-gray-500">
-                  {redditSubreddits.length} subreddit{redditSubreddits.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              <p className="text-sm text-gray-600 mb-4">
-                Search and add public subreddits to sync into your feed.
-              </p>
-              <div className="relative" ref={redditSearchContainerRef}>
-                <input
-                  type="text"
-                  value={redditQuery}
-                  onChange={(event) => {
-                    const nextQuery = event.target.value
-                    setRedditQuery(nextQuery)
-                    setIsRedditSearchOpen(nextQuery.trim().length >= 2)
-                  }}
-                  onKeyDown={(event) => {
-                    if (redditResults.length === 0) return
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault()
-                      setRedditHighlightedIndex((prev) =>
-                        prev < redditResults.length - 1 ? prev + 1 : 0
-                      )
-                    } else if (event.key === 'ArrowUp') {
-                      event.preventDefault()
-                      setRedditHighlightedIndex((prev) =>
-                        prev > 0 ? prev - 1 : redditResults.length - 1
-                      )
-                    } else if (event.key === 'Enter') {
-                      event.preventDefault()
-                      const selected = redditResults[redditHighlightedIndex]
-                      if (!selected) return
-                      const alreadyAdded = redditSubreddits.some(
-                        (subreddit) =>
-                          subreddit.subreddit.toLowerCase() === selected.subreddit.toLowerCase()
-                      )
-                      if (alreadyAdded) return
-                      addSubredditMutation.mutate({
-                        subreddit: selected.subreddit,
-                        title: selected.title,
-                        icon: selected.icon,
-                      })
-                      setRedditQuery('')
-                      setRedditResults([])
-                      setRedditHighlightedIndex(-1)
-                      setIsRedditSearchOpen(false)
-                    } else if (event.key === 'Escape') {
-                      setIsRedditSearchOpen(false)
-                      setRedditResults([])
-                      setRedditHighlightedIndex(-1)
-                    }
-                  }}
-                  placeholder="Search subreddits"
-                  className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
-                />
-                {isRedditSearchOpen &&
-                  (isRedditSearching ||
-                    redditResults.length > 0 ||
-                    redditQuery.trim().length >= 2) && (
-                    <div className="absolute z-10 mt-2 w-full rounded-[8px] border border-gray-200 bg-white shadow-sm">
-                      {isRedditSearching ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">Searching...</div>
-                      ) : redditResults.length > 0 ? (
-                        <div className="max-h-64 overflow-y-auto">
-                          {redditResults.map((result, index) => {
-                            const alreadyAdded = redditSubreddits.some(
-                              (subreddit) =>
-                                subreddit.subreddit.toLowerCase() === result.subreddit.toLowerCase()
-                            )
-                            return (
-                              <button
-                                key={result.subreddit}
-                                type="button"
-                                onClick={() => {
-                                  if (alreadyAdded) return
-                                  addSubredditMutation.mutate({
-                                    subreddit: result.subreddit,
-                                    title: result.title,
-                                    icon: result.icon,
-                                  })
-                                  setRedditQuery('')
-                                  setRedditResults([])
-                                  setRedditHighlightedIndex(-1)
-                                  setIsRedditSearchOpen(false)
-                                }}
-                                disabled={alreadyAdded || addSubredditMutation.isPending}
-                                className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50 ${
-                                  redditHighlightedIndex === index ? 'bg-gray-50' : ''
-                                }`}
-                              >
-                                <RedditSubredditThumbnail
-                                  src={result.icon}
-                                  className="h-8 w-8 rounded-full object-cover"
-                                />
-                                <div className="min-w-0">
-                                  <span className="text-sm text-gray-700 truncate block">
-                                    r/{result.subreddit}
-                                  </span>
-                                  <span className="text-xs text-gray-500 truncate block">
-                                    {result.title}
-                                  </span>
-                                </div>
-                              </button>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-gray-500">No results.</div>
-                      )}
-                    </div>
-                  )}
-              </div>
-              {redditSearchError && (
-                <p className="text-xs text-red-600 mt-2">{redditSearchError}</p>
-              )}
-              <div className="mt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-gray-700">Your subreddits</p>
-                  {redditStatus?.lastSyncedAt && (
-                    <p className="text-xs text-gray-500">
-                      Last synced: {new Date(redditStatus.lastSyncedAt).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-                {isRedditSubredditsLoading ? (
-                  <div className="h-4 w-40 bg-gray-100 rounded" />
-                ) : redditSubreddits.length > 0 ? (
-                  <div className="space-y-2">
-                    {redditSubreddits.map((subreddit) => (
-                      <div
-                        key={subreddit.subreddit}
-                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <RedditSubredditThumbnail
-                            src={subreddit.icon}
-                            className="h-8 w-8 rounded-full object-cover"
-                          />
-                          <div className="min-w-0">
-                            <span className="text-sm text-gray-700 truncate block">
-                              r/{subreddit.subreddit}
-                            </span>
-                            <span className="text-xs text-gray-500 truncate block">
-                              {subreddit.title}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-gray-600">Sort by:</span>
-                          <select
-                            value={subreddit.sort ?? 'new'}
-                            onChange={(event) => {
-                              const nextValue = event.target.value as 'new' | 'hot' | 'top'
-                              addSubredditMutation.mutate({
-                                subreddit: subreddit.subreddit,
-                                title: subreddit.title,
-                                icon: subreddit.icon,
-                                sort: nextValue,
-                              })
-                            }}
-                            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
-                          >
-                            <option value="new">New</option>
-                            <option value="hot">Hot</option>
-                            <option value="top">Top</option>
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              removeSubredditMutation.mutate({ subreddit: subreddit.subreddit })
-                            }
-                            disabled={removeSubredditMutation.isPending}
-                            className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">No subreddits added yet.</p>
-                )}
-              </div>
-
-            </div>
-          </section>
-
-          {/* Feed */}
-          <section>
-            <div className="bg-white rounded-[8px] p-5">
-              <h2 className="text-lg font-semibold mb-4">Feed</h2>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm text-gray-600">View thumbnails</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    View thumbnails for all content on the feed.
-                  </p>
-                </div>
-                <ToggleSwitch
-                  checked={viewThumbnails}
-                  onChange={() => {
-                    const nextViewThumbnails = !viewThumbnails
-                    const nextHideThumbnails = !nextViewThumbnails
-                    setViewThumbnails(nextViewThumbnails)
-                    writeHideThumbnailsPreference(nextHideThumbnails)
-                    updateSettingsMutation.mutate({ hideThumbnails: nextHideThumbnails })
-                  }}
-                  ariaLabel="View thumbnails"
-                />
-              </div>
-              <div className="mt-4 flex items-start justify-between gap-4 pl-0">
-                <div>
-                  <p className="text-sm text-gray-600">Greyscale mode</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Reduce distraction and excessive dopamine by switching everything on the app
-                    to black and white.
-                  </p>
-                </div>
-                <ToggleSwitch
-                  checked={greyscaleThumbnails}
-                  onChange={() => {
-                    const nextValue = !greyscaleThumbnails
-                    setGreyscaleThumbnails(nextValue)
-                    updateSettingsMutation.mutate({ greyscaleThumbnails: nextValue })
-                  }}
-                  ariaLabel="Greyscale mode"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* Email Newsletters */}
-          <section>
-            <div className="bg-white rounded-[8px] p-5">
-              <h2 className="text-lg font-semibold mb-4">Email Newsletters</h2>
-              <p className="text-sm text-gray-600 mb-4">
-                Use this email that we have generated to subscribe to newsletters that you want to show up in your feed.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="text-sm bg-gray-100 px-2 py-1 rounded border border-gray-300">
-                  {isEmailLoading ? 'Loading...' : emailData?.email || 'Email not available'}
-                </code>
-                <button
-                  onClick={() => {
-                    if (emailData?.email) copyToClipboard(emailData.email)
-                  }}
-                  disabled={!emailData?.email}
-                  className="px-3 py-1 min-w-[64px] border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
-                >
-                  {isEmailCopied ? '✓' : 'Copy'}
-                </button>
-              </div>
-              {emailError && (
-                <p className="text-xs text-red-600 mt-2">{String(emailError)}</p>
-              )}
-              <div className="mt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-gray-700">Senders</p>
-                  <span className="text-xs text-gray-500">
-                    {allowedEmailSenders.length} sender
-                    {allowedEmailSenders.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                {isEmailSendersLoading ? (
-                  <div className="h-4 w-40 bg-gray-100 rounded" />
-                ) : allowedEmailSenders.length > 0 ? (
-                  <div className="space-y-2">
-                    {allowedEmailSenders.map((sender) => (
-                      <div
-                        key={sender.email}
-                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <span className="text-sm text-gray-700 truncate block">
-                            {sender.name || sender.email}
-                          </span>
-                          {sender.name && (
-                            <span className="text-xs text-gray-500 truncate block">
-                              {sender.email}
-                            </span>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateEmailSenderMutation.mutate({
-                              email: sender.email,
-                              status: 'blocked',
-                            })
-                          }
-                          disabled={updateEmailSenderMutation.isPending}
-                          className="btn-remove px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
-                        >
-                          Block
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">No senders yet.</p>
-                )}
-              </div>
-              <div className="mt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-gray-700">Blocked senders</p>
-                  <span className="text-xs text-gray-500">
-                    {blockedEmailSenders.length} blocked
-                  </span>
-                </div>
-                {isEmailSendersLoading ? (
-                  <div className="h-4 w-40 bg-gray-100 rounded" />
-                ) : blockedEmailSenders.length > 0 ? (
-                  <div className="space-y-2">
-                    {blockedEmailSenders.map((sender) => (
-                      <div
-                        key={sender.email}
-                        className="flex items-center justify-between gap-3 border border-gray-200 rounded-[8px] px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <span className="text-sm text-gray-700 truncate block">
-                            {sender.name || sender.email}
-                          </span>
-                          {sender.name && (
-                            <span className="text-xs text-gray-500 truncate block">
-                              {sender.email}
-                            </span>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateEmailSenderMutation.mutate({
-                              email: sender.email,
-                              status: 'allowed',
-                            })
-                          }
-                          disabled={updateEmailSenderMutation.isPending}
-                          className="px-3 py-1 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
-                        >
-                          Unblock
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">No blocked senders.</p>
-                )}
-              </div>
             </div>
           </section>
         </div>

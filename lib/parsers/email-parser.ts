@@ -155,9 +155,6 @@ export function extractEmailContent(payload: {
         if (!firstOriginalSrc) firstOriginalSrc = originalSrc
       }
     })
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H12',location:'lib/parsers/email-parser.ts:33',message:'extractEmailContent img attributes',data:{imgCount:imgElements.length,srcCount,dataSrcCount,srcsetCount,dataSrcsetCount,lazySrcCount,originalSrcCount,firstSrcHost:safeHost(firstSrc),firstDataSrcHost:safeHost(firstDataSrc),firstSrcsetHost:safeHost(firstSrcset),firstDataSrcsetHost:safeHost(firstDataSrcset),firstLazySrcHost:safeHost(firstLazySrc),firstOriginalSrcHost:safeHost(firstOriginalSrc),firstSrcsetMaxWidth,firstSrcsetMaxHost,firstSrcsetMaxUrl: firstSrcsetMaxUrl ? firstSrcsetMaxUrl.slice(0, 200) : null,firstSrcsetWidths:firstSrcsetWidths.slice(0,6),imagesCaptured:images.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
   }
 
   const textContent = payload.text || stripHtml(payload.html || '')
@@ -182,12 +179,6 @@ export function extractEmailContent(payload: {
   })
   const textImageFetchFirst = textImageFetchMatches[0] || null
   const textImageFetchHost = textImageFetchFirst ? safeUrlHost(textImageFetchFirst) : null
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H13',location:'lib/parsers/email-parser.ts:46',message:'extractEmailContent image fetch matches',data:{hasHtml:Boolean(payload.html),htmlImageFetchCount:htmlImageFetchMatches.length,htmlImageFetchHost:htmlImageFetchHosts,hasText:Boolean(payload.text),textImageFetchCount:textImageFetchMatches.length,textImageFetchHost:textImageFetchHost},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H5',location:'lib/parsers/email-parser.ts:22',message:'extractEmailContent cleaned text/links/images',data:{hasHtml:Boolean(payload.html),textLen:textContent.length,cleanedLen:cleanedTextContent.length,trackingFound:hasSubstackTracking(textContent),links:links.length,images:images.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
 
   return {
     textContent: cleanedTextContent,
@@ -207,9 +198,6 @@ export async function parseEmail(rawEmail: Buffer | string): Promise<ParsedEmail
     text: parsed.text || null,
     html: parsed.html || null,
   })
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'lib/parsers/email-parser.ts:52',message:'parseEmail cleaned text/links/images',data:{hasHtml:Boolean(parsed.html),textLen:textContent.length,cleanedLen:textContent.length,trackingFound:hasSubstackTracking(parsed.text || ''),links:links.length,images:images.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
 
   return {
     subject: parsed.subject || 'No Subject',
@@ -252,9 +240,6 @@ export function emailToFeedItem(
   const url = parsedEmail.links.find((link) => 
     link.startsWith('http') && !link.includes('unsubscribe')
   ) || parsedEmail.links[0] || '#'
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H2',location:'lib/parsers/email-parser.ts:91',message:'emailToFeedItem excerpt/thumbnail',data:{excerptStartsWithTracking:hasSubstackTracking(excerpt || ''),excerptLen:excerpt?.length ?? 0,thumbnailPresent:Boolean(thumbnail),thumbnailHost:thumbnail ? safeUrlHost(thumbnail) : null,thumbnailIsFetch:typeof thumbnail==='string' && /substackcdn\.com\/image\/fetch/i.test(thumbnail),thumbnailIsBucket:typeof thumbnail==='string' && /bucketeer|s3\.amazonaws\.com/i.test(thumbnail),links:parsedEmail.links.length,images:parsedEmail.images.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
 
   return {
     source: 'substack',

@@ -220,7 +220,6 @@ model UserSettings {
   shortsMinSeconds   Int      @default(60)
   hideThumbnails     Boolean  @default(false)
   greyscaleThumbnails Boolean @default(false)
-  feedType           String   @default("balanced")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

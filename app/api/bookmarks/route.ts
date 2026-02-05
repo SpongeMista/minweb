@@ -9,6 +9,7 @@ const AddSchema = z.object({
 
 const RemoveSchema = z.object({
   feedItemId: z.string().min(1),
+  restoreFeedItem: z.boolean().optional(),
 })
 
 export async function GET() {
@@ -18,13 +19,31 @@ export async function GET() {
       where: { userId },
       orderBy: { createdAt: 'desc' },
       include: {
-        feedItem: true,
+        feedItem: {
+          include: {
+            _count: {
+              select: {
+                bookmarks: true,
+                notes: true,
+              },
+            },
+          },
+        },
       },
     })
 
     const items = bookmarks
       .map((bookmark) => bookmark.feedItem)
       .filter((item) => item !== null)
+      .map((item: any) => {
+        const counts = item?._count ?? {}
+        const { _count, ...rest } = item
+        return {
+          ...rest,
+          bookmarkCount: counts.bookmarks ?? 0,
+          notesCount: counts.notes ?? 0,
+        }
+      })
 
     return NextResponse.json({ items })
   } catch (error) {
@@ -65,16 +84,18 @@ export async function DELETE(request: NextRequest) {
   try {
     const userId = await getDefaultUserId()
     const body = await request.json()
-    const { feedItemId } = RemoveSchema.parse(body)
+    const { feedItemId, restoreFeedItem = true } = RemoveSchema.parse(body)
 
     const bookmark = await prisma.userBookmark.delete({
       where: { userId_feedItemId: { userId, feedItemId } },
     })
 
-    await prisma.feedItem.update({
-      where: { id: bookmark.feedItemId },
-      data: { deletedAt: null },
-    })
+    if (restoreFeedItem) {
+      await prisma.feedItem.update({
+        where: { id: bookmark.feedItemId },
+        data: { deletedAt: null },
+      })
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {

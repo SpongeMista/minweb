@@ -39,11 +39,13 @@ interface FeedItemProps {
       subreddit?: string
       images?: string[]
     } | null
+    bookmarks?: Array<{ id: string }>
+    bookmarkCount?: number
+    notesCount?: number
   }
   hideThumbnails?: boolean
   greyscaleThumbnails?: boolean
   isBookmarksList?: boolean
-  feedType?: 'chronological' | 'balanced'
   isActive?: boolean
   onHover?: () => void
 }
@@ -53,7 +55,6 @@ export default function FeedItem({
   hideThumbnails = false,
   greyscaleThumbnails = false,
   isBookmarksList = false,
-  feedType,
   isActive = false,
   onHover,
 }: FeedItemProps) {
@@ -120,23 +121,31 @@ export default function FeedItem({
   const showThumbnail = !hideThumbnails && (effectiveThumbnail || isSubstack || isReddit)
   const displayAuthor =
     isReddit && item.rawPayload?.subreddit ? `r/${item.rawPayload.subreddit}` : item.author
-  // #region agent log
-  if (isSubstack) {
-    const emailTextHasTracking =
-      typeof item.emailText === 'string' &&
-      item.emailText.includes('eotrx.substackcdn.com/open?token=')
-    const excerptHasTracking =
-      typeof item.excerpt === 'string' &&
-      item.excerpt.includes('eotrx.substackcdn.com/open?token=')
-    const previewHasImageFetch =
-      typeof emailPreview === 'string' &&
-      /substackcdn\.com\/image\/fetch/i.test(emailPreview)
-    if (emailTextHasTracking || excerptHasTracking || !effectiveThumbnail || previewHasImageFetch) {
-      fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H9',location:'components/FeedItem.tsx:63',message:'substack feed item render',data:{id:item.id,hasThumbnail:Boolean(item.thumbnail),hasEffectiveThumbnail:Boolean(effectiveThumbnail),emailTextHasTracking,excerptHasTracking,previewHasImageFetch,emailTextHasImageFetch,textImageMatch: Boolean(textImageMatch),hasEmailHtml:Boolean(item.emailHtml),htmlHasImageFetch,previewSource:cleanedExcerpt ? 'excerpt' : 'emailText'},timestamp:Date.now()})}).catch(()=>{});
-    }
+  const bookmarkCount = item.bookmarkCount ?? item.bookmarks?.length ?? 0
+  const notesCount = item.notesCount ?? 0
+  const isBookmarked = isBookmarksList || bookmarkCount > 0
+  const hasNotes = notesCount > 0
+  const notesLabel = notesCount === 1 ? '1 note' : `${notesCount} notes`
+  const updateFeedCache = (updater: (pageItem: any) => any) => {
+    queryClient.setQueryData(['feed'], (current: any) => {
+      if (!current?.pages) return current
+      const nextPages = current.pages.map((page: any) => ({
+        ...page,
+        items: Array.isArray(page.items) ? page.items.map(updater).filter(Boolean) : page.items,
+      }))
+      return { ...current, pages: nextPages }
+    })
   }
-  // #endregion agent log
 
+  const updateBookmarksCache = (updater: (items: any[]) => any[]) => {
+    queryClient.setQueryData(['bookmarks'], (current: any) => {
+      if (!Array.isArray(current?.items)) return current
+      return {
+        ...current,
+        items: updater(current.items),
+      }
+    })
+  }
   const restoreItem = async () => {
     if (!item.id) return
     const res = await fetch(`/api/feed/${item.id}`, { method: 'PATCH' })
@@ -149,13 +158,35 @@ export default function FeedItem({
 
   const deleteItem = async () => {
     if (!item.id || isDeleting) return
+    const previousFeed = queryClient.getQueryData(['feed'])
+    const previousBookmarks = queryClient.getQueryData(['bookmarks'])
+    const restoreCaches = () => {
+      if (previousFeed) {
+        queryClient.setQueryData(['feed'], previousFeed)
+      }
+      if (previousBookmarks) {
+        queryClient.setQueryData(['bookmarks'], previousBookmarks)
+      }
+    }
+    updateFeedCache((pageItem) => (pageItem?.id === item.id ? null : pageItem))
+    updateBookmarksCache((items) => items.filter((bookmarkItem: any) => bookmarkItem?.id !== item.id))
     setIsDeleting(true)
     try {
-      const res = await fetch(`/api/feed/${item.id}`, { method: 'DELETE' })
+      const deleteEndpoint = isBookmarksList ? '/api/bookmarks' : `/api/feed/${item.id}`
+      const deleteOptions: RequestInit = isBookmarksList
+        ? {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ feedItemId: item.id }),
+          }
+        : { method: 'DELETE' }
+      const res = await fetch(deleteEndpoint, deleteOptions)
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: 'Failed to delete' }))
         throw new Error(error.error || 'Failed to delete')
       }
+      sessionStorage.setItem('lastDeletedId', item.id)
+      sessionStorage.setItem('lastDeletedSource', isBookmarksList ? 'bookmarks' : 'feed')
       const { dismiss } = toast({
         title: 'Item deleted',
         duration: 3000,
@@ -165,8 +196,21 @@ export default function FeedItem({
             className="text-sm text-gray-700 underline underline-offset-2 hover:text-gray-900"
             onClick={async (event) => {
               event.preventDefault()
+              restoreCaches()
               try {
-                await restoreItem()
+                if (isBookmarksList) {
+                  const res = await fetch('/api/bookmarks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feedItemId: item.id }),
+                  })
+                  if (!res.ok) {
+                    const error = await res.json().catch(() => ({ error: 'Failed to bookmark' }))
+                    throw new Error(error.error || 'Failed to bookmark')
+                  }
+                } else {
+                  await restoreItem()
+                }
               } catch (error) {
                 toast({ title: 'Undo failed', description: String(error) })
               } finally {
@@ -178,21 +222,8 @@ export default function FeedItem({
           </button>
         ),
       })
-      if (!isBookmarksList) {
-        queryClient.setQueryData(['feed'], (current: any) => {
-          if (!current?.pages) return current
-          const nextPages = current.pages.map((page: any) => ({
-            ...page,
-            items: Array.isArray(page.items)
-              ? page.items.filter((pageItem: any) => pageItem?.id !== item.id)
-              : page.items,
-          }))
-          return { ...current, pages: nextPages }
-        })
-      } else {
-        queryClient.invalidateQueries({ queryKey: ['feed'] })
-      }
     } catch (error) {
+      restoreCaches()
       toast({ title: 'Delete failed', description: String(error) })
     } finally {
       setIsDeleting(false)
@@ -216,6 +247,29 @@ export default function FeedItem({
 
   const bookmarkItem = async () => {
     if (!item.id) return
+    setMenuOpen(false)
+    const previousBookmarks = queryClient.getQueryData(['bookmarks'])
+    const previousFeed = queryClient.getQueryData(['feed'])
+    updateBookmarksCache((items) => {
+      if (items.some((bookmarkItem: any) => bookmarkItem?.id === item.id)) return items
+      return [
+        {
+          ...item,
+          bookmarkCount: Math.max(item.bookmarkCount ?? 0, 1),
+          notesCount: item.notesCount ?? 0,
+        },
+        ...items,
+      ]
+    })
+    updateFeedCache((pageItem) => {
+      if (pageItem?.id !== item.id) return pageItem
+      if (!isBookmarksList) return null
+      return {
+        ...pageItem,
+        bookmarks: [{ id: 'optimistic' }],
+        bookmarkCount: Math.max(pageItem.bookmarkCount ?? 0, 1),
+      }
+    })
     try {
       const res = await fetch('/api/bookmarks', {
         method: 'POST',
@@ -227,16 +281,31 @@ export default function FeedItem({
         throw new Error(error.error || 'Failed to bookmark')
       }
       toast({ title: 'This item has been bookmarked' })
-      queryClient.invalidateQueries({ queryKey: ['feed'] })
     } catch (error) {
+      if (previousBookmarks) {
+        queryClient.setQueryData(['bookmarks'], previousBookmarks)
+      }
+      if (previousFeed) {
+        queryClient.setQueryData(['feed'], previousFeed)
+      }
       toast({ title: 'Bookmark failed', description: String(error) })
-    } finally {
-      setMenuOpen(false)
     }
   }
 
   const removeBookmark = async () => {
     if (!item.id) return
+    setMenuOpen(false)
+    const previousBookmarks = queryClient.getQueryData(['bookmarks'])
+    const previousFeed = queryClient.getQueryData(['feed'])
+    updateBookmarksCache((items) => items.filter((bookmarkItem: any) => bookmarkItem?.id !== item.id))
+    updateFeedCache((pageItem) => {
+      if (pageItem?.id !== item.id) return pageItem
+      return {
+        ...pageItem,
+        bookmarks: [],
+        bookmarkCount: 0,
+      }
+    })
     try {
       const res = await fetch('/api/bookmarks', {
         method: 'DELETE',
@@ -247,12 +316,14 @@ export default function FeedItem({
         const error = await res.json().catch(() => ({ error: 'Failed to remove bookmark' }))
         throw new Error(error.error || 'Failed to remove bookmark')
       }
-      queryClient.invalidateQueries({ queryKey: ['bookmarks'] })
-      queryClient.invalidateQueries({ queryKey: ['feed'] })
     } catch (error) {
+      if (previousBookmarks) {
+        queryClient.setQueryData(['bookmarks'], previousBookmarks)
+      }
+      if (previousFeed) {
+        queryClient.setQueryData(['feed'], previousFeed)
+      }
       toast({ title: 'Remove bookmark failed', description: String(error) })
-    } finally {
-      setMenuOpen(false)
     }
   }
 
@@ -302,6 +373,7 @@ export default function FeedItem({
           <DropdownMenuItem
             onSelect={(event) => {
               event.preventDefault()
+              setMenuOpen(false)
               if (isBookmarksList) {
                 removeBookmark()
               } else {
@@ -396,6 +468,20 @@ export default function FeedItem({
     </div>
   )
 
+  const bookmarkBadge = isBookmarked ? (
+    <span className="absolute right-12 top-[-10px] z-10 inline-flex h-8 w-8 items-center justify-center text-[#FF2D55]">
+      <svg
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+        className="h-5 w-5"
+      >
+        <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
+      </svg>
+    </span>
+  ) : null
+
   const confirmDialog = (
     <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
       <AlertDialogContent>
@@ -434,16 +520,8 @@ export default function FeedItem({
                 src={effectiveThumbnail}
                 alt=""
                 className="w-full h-full object-cover"
-                onLoad={() => {
-                  // #region agent log
-                  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H11',location:'components/FeedItem.tsx:368',message:'thumbnail load success',data:{id:item.id,source:item.source,thumbnailHost:effectiveThumbnailHost},timestamp:Date.now()})}).catch(()=>{});
-                  // #endregion agent log
-                }}
                 onError={() => {
                   setThumbnailError(true)
-                  // #region agent log
-                  fetch('http://127.0.0.1:7242/ingest/d522e45f-6553-41ae-9f89-ce175ebda76a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H10',location:'components/FeedItem.tsx:373',message:'thumbnail load error',data:{id:item.id,source:item.source,thumbnailHost:effectiveThumbnailHost},timestamp:Date.now()})}).catch(()=>{});
-                  // #endregion agent log
                 }}
               />
             ) : (
@@ -540,6 +618,44 @@ export default function FeedItem({
           {emailPreview && (
             <p className="text-sm text-gray-600 line-clamp-2">{emailPreview}</p>
           )}
+          {hasNotes && (
+            <div className="mt-3 flex items-center gap-4 text-sm text-gray-600">
+              {hasNotes && (
+                <span className="inline-flex items-center gap-2">
+                  <svg
+                    viewBox="0 0 750 750"
+                    fill="currentColor"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      d="M214.5 365.5L534.5 365.5"
+                      stroke="currentColor"
+                      strokeWidth="57"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M214.5 233.5L534.5 233.5"
+                      stroke="currentColor"
+                      strokeWidth="57"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M214.5 497.5L364.5 497.5"
+                      stroke="currentColor"
+                      strokeWidth="57"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M636.5 0C699.184 0 750 50.8157 750 113.5V522.565C750 533.174 745.786 543.348 738.284 550.85L551.232 737.901C543.8 745.333 533.742 749.542 523.231 749.616L469 750H113.5C50.8157 750 0 699.184 0 636.5V113.5C0 50.8157 50.8157 0 113.5 0H636.5ZM113.5 75C92.237 75 75 92.237 75 113.5V636.5C75 657.763 92.237 675 113.5 675H469V578.5C469 528.794 509.294 488.5 559 488.5H675V113.5C675 92.237 657.763 75 636.5 75H113.5Z"
+                    />
+                  </svg>
+                  <span>{notesLabel}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </article>
@@ -567,6 +683,7 @@ export default function FeedItem({
             aria-hidden="true"
           />
         )}
+        {bookmarkBadge}
         {menu}
         {confirmDialog}
         <Link
@@ -600,6 +717,7 @@ export default function FeedItem({
             aria-hidden="true"
           />
         )}
+        {bookmarkBadge}
         {menu}
         {confirmDialog}
         <Link
@@ -642,6 +760,7 @@ export default function FeedItem({
           aria-hidden="true"
         />
       )}
+      {bookmarkBadge}
       {menu}
       {confirmDialog}
       <Link
