@@ -236,10 +236,7 @@ export default function FeedPage() {
         return
       }
 
-      if (
-        (event.key === 'Delete' || event.key === 'Backspace') &&
-        activeItemId
-      ) {
+      if (event.key.toLowerCase() === 'd' && activeItemId) {
         event.preventDefault()
         const currentIndex = items.findIndex((item) => item.id === activeItemId)
         const nextCandidate =

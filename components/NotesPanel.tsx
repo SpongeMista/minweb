@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useNotesDrawer } from '@/components/NotesDrawerContext'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,14 +24,17 @@ type FeedItemNote = {
   id: string
   body: string
   createdAt: string
+  highlightId?: string | null
 }
 
 type NotesPanelProps = {
   feedItemId: string
+  embeddedInDrawer?: boolean
 }
 
-export default function NotesPanel({ feedItemId }: NotesPanelProps) {
+export default function NotesPanel({ feedItemId, embeddedInDrawer }: NotesPanelProps) {
   const queryClient = useQueryClient()
+  const notesDrawer = useNotesDrawer()
   const [notes, setNotes] = useState<FeedItemNote[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
@@ -47,6 +51,7 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const notesScrollRef = useRef<HTMLDivElement | null>(null)
   const ignoreNextEditBlurRef = useRef(false)
   const latestNotesRef = useRef<FeedItemNote[]>([])
   const latestActiveNoteIdRef = useRef<string | null>(null)
@@ -108,6 +113,22 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
     void loadNotes()
   }, [feedItemId])
 
+  useEffect(() => {
+    const handleNotesChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ feedItemId: string }>).detail
+      if (detail?.feedItemId === feedItemId) {
+        void loadNotes()
+      }
+    }
+    window.addEventListener('notes-changed', handleNotesChanged)
+    return () => window.removeEventListener('notes-changed', handleNotesChanged)
+  }, [feedItemId])
+
+  const setNotesCount = notesDrawer?.setNotesCount
+  useEffect(() => {
+    setNotesCount?.(notes.length)
+  }, [notes.length, setNotesCount])
+
   const resizeNoteTextarea = () => {
     const textarea = noteTextareaRef.current
     if (!textarea) return
@@ -127,6 +148,8 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
     requestAnimationFrame(() => {
       noteTextareaRef.current?.focus()
       resizeNoteTextarea()
+      const scrollEl = notesScrollRef.current
+      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight
     })
   }, [isAdding])
 
@@ -218,7 +241,7 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
       }
       const data = await res.json()
       if (data?.note) {
-        setNotes((prev) => [data.note as FeedItemNote, ...prev])
+        setNotes((prev) => [...prev, data.note as FeedItemNote])
         updateFeedCounts((item) => applyNotesDelta(item, 1))
         updateBookmarksCounts((item) => applyNotesDelta(item, 1))
       } else {
@@ -311,6 +334,9 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
         next.delete(deleteTarget.id)
         return next
       })
+      if (deleteTarget.highlightId) {
+        window.dispatchEvent(new CustomEvent('highlights-changed', { detail: { feedItemId } }))
+      }
       setDeleteTarget(null)
     } catch (err) {
       setError(String(err))
@@ -319,65 +345,48 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
     }
   }
 
-  return (
-    <div className="bg-white rounded-[8px] px-5 pt-3 pb-5 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 className="text-lg font-semibold text-black">Notes</h2>
-        <span className="text-sm text-gray-400">{notes.length} notes</span>
-      </div>
-      <button
-        type="button"
-        className="w-full mb-4 h-10 rounded-[8px] border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-4 px-4"
-        onClick={() => setIsAdding(true)}
-      >
-        <span>+ Add a new note</span>
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 text-gray-500">
-            ⇧
-          </span>
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 text-gray-500">
-            N
-          </span>
+  const addButton = (
+    <button
+      type="button"
+      className="w-full h-10 rounded-[8px] bg-black text-white text-sm hover:bg-gray-800 transition-colors flex items-center justify-center gap-4 px-4"
+      onClick={() => setIsAdding(true)}
+    >
+      <span>+ Add a new note</span>
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-500 text-gray-300">
+          ⇧
         </span>
-      </button>
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-500 text-gray-300">
+          N
+        </span>
+      </span>
+    </button>
+  )
 
-      {isAdding && (
-        <div className="mb-4">
-          <textarea
-            ref={noteTextareaRef}
-            value={noteBody}
-            onChange={(event) => {
-              setNoteBody(event.target.value)
-              resizeNoteTextarea()
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                void saveNote()
-              }
-            }}
-            onBlur={() => {
-              if (noteBody.trim()) {
-                void saveNote()
-              } else {
-                setNoteBody('')
-                setIsAdding(false)
-              }
-            }}
-            rows={1}
-            className="w-full border border-gray-300 rounded-[8px] p-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 resize-none overflow-hidden"
-            placeholder="Write your note..."
-          />
+  const wrapperClass = embeddedInDrawer
+    ? 'flex flex-col h-full min-h-0 px-4'
+    : 'bg-white rounded-[8px] px-5 pt-3 pb-5 shadow-sm border border-gray-100'
+
+  return (
+    <div className={wrapperClass}>
+      {!embeddedInDrawer && (
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="text-lg font-semibold text-black">Notes</h2>
+          <span className="text-sm text-gray-400">{notes.length} notes</span>
         </div>
       )}
 
-      {error && (
-        <p className="text-xs text-red-600 mb-3">
-          {error}
-        </p>
+      {!embeddedInDrawer && isAdding && (
+        <div className="mb-4">
+          <textarea ref={noteTextareaRef} value={noteBody} onChange={(e) => { setNoteBody(e.target.value); resizeNoteTextarea() }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveNote() } }} onBlur={() => { noteBody.trim() ? void saveNote() : (setNoteBody(''), setIsAdding(false)) }} rows={1} className="w-full border border-gray-300 rounded-[8px] p-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 resize-none overflow-hidden" placeholder="Write your note..." />
+        </div>
       )}
 
-      {isLoading ? (
+      {!embeddedInDrawer && error && (
+        <p className="text-xs text-red-600 mb-3">{error}</p>
+      )}
+
+      {!embeddedInDrawer && (isLoading ? (
         <div className="space-y-3">
           <div className="h-4 bg-gray-100 rounded" />
           <div className="h-4 bg-gray-100 rounded w-5/6" />
@@ -392,7 +401,7 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
             return (
               <div
                 key={note.id}
-                className="border border-gray-100 rounded-[8px] p-3 relative"
+                className="border border-gray-100 rounded-[8px] p-3 relative bg-white"
                 onMouseEnter={() => setActiveNoteId(note.id)}
               >
                 {isActive && (
@@ -429,18 +438,20 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onSelect={(event) => {
-                          event.preventDefault()
-                          setMenuOpenId(null)
-                          startEditing(note)
-                        }}
-                      >
-                        <span className="flex-1">Edit</span>
-                        <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
-                          Enter
-                        </span>
-                      </DropdownMenuItem>
+                      {!note.highlightId && (
+                        <DropdownMenuItem
+                          onSelect={(event) => {
+                            event.preventDefault()
+                            setMenuOpenId(null)
+                            startEditing(note)
+                          }}
+                        >
+                          <span className="flex-1">Edit</span>
+                          <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
+                            Enter
+                          </span>
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem
                         className="text-red-600 focus:text-red-600"
                         onSelect={(event) => {
@@ -515,7 +526,13 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
                         shouldTruncate ? 'line-clamp-3' : ''
                       }`}
                     >
-                      {note.body}
+                      {note.highlightId ? (
+                        <span className="bg-yellow-200 rounded-[2px] px-0.5 [box-decoration-break:clone]">
+                          {note.body}
+                        </span>
+                      ) : (
+                        note.body
+                      )}
                     </p>
                     <p className="text-xs text-gray-400 mt-2">
                       {new Date(note.createdAt).toLocaleString()}
@@ -526,7 +543,150 @@ export default function NotesPanel({ feedItemId }: NotesPanelProps) {
             )
           })}
         </div>
-      ) : null}
+      ) : null)}
+
+      {embeddedInDrawer ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div
+            ref={notesScrollRef}
+            className="flex-1 min-h-0 overflow-y-auto py-4 -mx-4 px-4"
+          >
+            <div>
+              {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
+              {isLoading ? (
+                <div className="space-y-3">
+                  <div className="h-4 bg-gray-100 rounded" />
+                  <div className="h-4 bg-gray-100 rounded w-5/6" />
+                </div>
+              ) : notes.length > 0 ? (
+                <div className="space-y-4">
+                  {notes.map((note) => {
+                    const isEditing = editingNoteId === note.id
+                    const isExpanded = expandedNoteIds.has(note.id)
+                    const shouldTruncate = isLongNote(note) && !isExpanded
+                    const isActive = activeNoteId === note.id
+                    return (
+                      <div
+                        key={note.id}
+                        className="border border-gray-100 rounded-[8px] p-3 relative bg-white"
+                        onMouseEnter={() => setActiveNoteId(note.id)}
+                      >
+                        {isActive && <span className="absolute left-0 top-0 h-full w-1 bg-black rounded-l-[8px]" aria-hidden="true" />}
+                        <div className="absolute right-2 top-2">
+                          <DropdownMenu open={menuOpenId === note.id} onOpenChange={(open) => setMenuOpenId(open ? note.id : null)}>
+                            <DropdownMenuTrigger asChild>
+                              <button type="button" aria-label="More options" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus:outline-none" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                  <circle cx="12" cy="5" r="2.25" fill="currentColor" /><circle cx="12" cy="12" r="2.25" fill="currentColor" /><circle cx="12" cy="19" r="2.25" fill="currentColor" />
+                                </svg>
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {!note.highlightId && (
+                                <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setMenuOpenId(null); startEditing(note) }}><span className="flex-1">Edit</span><span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">Enter</span></DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem className="text-red-600 focus:text-red-600" onSelect={(e) => { e.preventDefault(); setMenuOpenId(null); setDeleteTarget(note) }}><span className="flex-1">Delete</span><span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">Del</span></DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        {isEditing ? (
+                          <div className="pr-8">
+                            <textarea ref={editTextareaRef} value={editingBody} onChange={(e) => { setEditingBody(e.target.value); resizeEditTextarea() }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit() } }} onBlur={() => { if (ignoreNextEditBlurRef.current) { ignoreNextEditBlurRef.current = false; return } ; editingBody.trim() ? void saveEdit() : setError('Note cannot be empty.') }} rows={1} className="w-full border border-gray-300 rounded-[8px] p-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 resize-none overflow-hidden" disabled={isSaving} />
+                            <p className="text-xs text-gray-400 mt-2">{new Date(note.createdAt).toLocaleString()}</p>
+                          </div>
+                        ) : (
+                          <button type="button" className="w-full text-left pr-8" onClick={() => isLongNote(note) && setExpandedNoteIds((prev) => { const next = new Set(prev); next.has(note.id) ? next.delete(note.id) : next.add(note.id); return next })}>
+                            <p className={`text-sm text-gray-700 whitespace-pre-wrap ${shouldTruncate ? 'line-clamp-3' : ''}`}>
+                            {note.highlightId ? (
+                              <span className="bg-yellow-200 rounded-[2px] px-0.5 [box-decoration-break:clone]">{note.body}</span>
+                            ) : (
+                              note.body
+                            )}
+                          </p>
+                            <p className="text-xs text-gray-400 mt-2">{new Date(note.createdAt).toLocaleString()}</p>
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : null}
+              {isAdding && (
+                <div className="mt-4 flex-shrink-0">
+                  <textarea ref={noteTextareaRef} value={noteBody} onChange={(e) => { setNoteBody(e.target.value); resizeNoteTextarea() }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveNote() } }} onBlur={() => { noteBody.trim() ? void saveNote() : (setNoteBody(''), setIsAdding(false)) }} rows={1} className="w-full border border-gray-300 rounded-[8px] p-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 resize-none overflow-hidden" placeholder="Write your note..." />
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex-shrink-0 pt-4 pb-4 -mx-4 px-4">
+            {addButton}
+          </div>
+        </div>
+      ) : (
+        <>
+          {isAdding && (
+            <div className="mb-4">
+              <textarea ref={noteTextareaRef} value={noteBody} onChange={(e) => { setNoteBody(e.target.value); resizeNoteTextarea() }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveNote() } }} onBlur={() => { noteBody.trim() ? void saveNote() : (setNoteBody(''), setIsAdding(false)) }} rows={1} className="w-full border border-gray-300 rounded-[8px] p-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 resize-none overflow-hidden" placeholder="Write your note..." />
+            </div>
+          )}
+          {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
+          {isLoading ? (
+            <div className="space-y-3">
+              <div className="h-4 bg-gray-100 rounded" />
+              <div className="h-4 bg-gray-100 rounded w-5/6" />
+            </div>
+          ) : notes.length > 0 ? (
+            <div className="space-y-4">
+              {notes.map((note) => {
+                const isEditing = editingNoteId === note.id
+                const isExpanded = expandedNoteIds.has(note.id)
+                const shouldTruncate = isLongNote(note) && !isExpanded
+                const isActive = activeNoteId === note.id
+                return (
+                  <div key={note.id} className="border border-gray-100 rounded-[8px] p-3 relative bg-white" onMouseEnter={() => setActiveNoteId(note.id)}>
+                    {isActive && <span className="absolute left-0 top-0 h-full w-1 bg-black rounded-l-[8px]" aria-hidden="true" />}
+                    <div className="absolute right-2 top-2">
+                      <DropdownMenu open={menuOpenId === note.id} onOpenChange={(open) => setMenuOpenId(open ? note.id : null)}>
+                        <DropdownMenuTrigger asChild>
+                          <button type="button" aria-label="More options" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus:outline-none" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="5" r="2.25" fill="currentColor" /><circle cx="12" cy="12" r="2.25" fill="currentColor" /><circle cx="12" cy="19" r="2.25" fill="currentColor" /></svg>
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {!note.highlightId && (
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setMenuOpenId(null); startEditing(note) }}><span className="flex-1">Edit</span><span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">Enter</span></DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem className="text-red-600 focus:text-red-600" onSelect={(e) => { e.preventDefault(); setMenuOpenId(null); setDeleteTarget(note) }}><span className="flex-1">Delete</span><span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">Del</span></DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    {isEditing ? (
+                      <div className="pr-8">
+                        <textarea ref={editTextareaRef} value={editingBody} onChange={(e) => { setEditingBody(e.target.value); resizeEditTextarea() }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit() } }} onBlur={() => { if (ignoreNextEditBlurRef.current) { ignoreNextEditBlurRef.current = false; return }; editingBody.trim() ? void saveEdit() : setError('Note cannot be empty.') }} rows={1} className="w-full border border-gray-300 rounded-[8px] p-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 resize-none overflow-hidden" disabled={isSaving} />
+                        <p className="text-xs text-gray-400 mt-2">{new Date(note.createdAt).toLocaleString()}</p>
+                      </div>
+                    ) : (
+                      <button type="button" className="w-full text-left pr-8" onClick={() => isLongNote(note) && setExpandedNoteIds((prev) => { const next = new Set(prev); next.has(note.id) ? next.delete(note.id) : next.add(note.id); return next })}>
+                        <p className={`text-sm text-gray-700 whitespace-pre-wrap ${shouldTruncate ? 'line-clamp-3' : ''}`}>
+                        {note.highlightId ? (
+                          <span className="bg-yellow-200 rounded-[2px] px-0.5 [box-decoration-break:clone]">{note.body}</span>
+                        ) : (
+                          note.body
+                        )}
+                      </p>
+                        <p className="text-xs text-gray-400 mt-2">{new Date(note.createdAt).toLocaleString()}</p>
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
+          <div className="mt-4 pt-4">
+            {addButton}
+          </div>
+        </>
+      )}
 
       <AlertDialog
         open={Boolean(deleteTarget)}

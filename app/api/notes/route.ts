@@ -27,7 +27,8 @@ export async function GET(request: NextRequest) {
 
     const notes = await prisma.feedItemNote.findMany({
       where: { userId, feedItemId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' },
+      include: { highlight: true },
     })
 
     return NextResponse.json({ notes })
@@ -75,12 +76,22 @@ export async function DELETE(request: NextRequest) {
     const body = await request.json()
     const { id } = DeleteSchema.parse(body)
 
-    const result = await prisma.feedItemNote.deleteMany({
+    const note = await prisma.feedItemNote.findFirst({
       where: { id, userId },
+      select: { id: true, highlightId: true },
+    })
+    if (!note) {
+      return NextResponse.json({ error: 'Note not found' }, { status: 404 })
+    }
+
+    await prisma.feedItemNote.delete({
+      where: { id: note.id },
     })
 
-    if (result.count === 0) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 })
+    if (note.highlightId) {
+      await prisma.highlight.deleteMany({
+        where: { id: note.highlightId, userId },
+      })
     }
 
     return NextResponse.json({ success: true })
@@ -99,9 +110,24 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json()
     const { id, body: noteBody } = UpdateSchema.parse(body)
 
-    const note = await prisma.feedItemNote.update({
+    const existingNote = await prisma.feedItemNote.findFirst({
       where: { id, userId },
+      select: { id: true, highlightId: true },
+    })
+    if (!existingNote) {
+      return NextResponse.json({ error: 'Note not found' }, { status: 404 })
+    }
+    if (existingNote.highlightId) {
+      return NextResponse.json(
+        { error: 'Highlight notes cannot be edited' },
+        { status: 400 }
+      )
+    }
+
+    const note = await prisma.feedItemNote.update({
+      where: { id: existingNote.id },
       data: { body: noteBody.trim() },
+      include: { highlight: true },
     })
 
     return NextResponse.json({ note })

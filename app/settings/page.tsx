@@ -922,7 +922,11 @@ export default function SettingsPage() {
                   <p className="text-sm font-medium text-gray-700">Your subreddits</p>
                   {redditStatus?.lastSyncedAt && (
                     <p className="text-xs text-gray-500">
-                      Last synced: {new Date(redditStatus.lastSyncedAt).toLocaleString()}
+                      Last synced:{' '}
+                      {new Date(redditStatus.lastSyncedAt).toLocaleString(undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
                     </p>
                   )}
                 </div>
@@ -1106,7 +1110,11 @@ export default function SettingsPage() {
                   <p className="text-sm font-medium text-gray-700">Your channels</p>
                   {youtubeStatus?.lastSyncedAt && (
                     <p className="text-xs text-gray-500">
-                      Last synced: {new Date(youtubeStatus.lastSyncedAt).toLocaleString()}
+                      Last synced:{' '}
+                      {new Date(youtubeStatus.lastSyncedAt).toLocaleString(undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
                     </p>
                   )}
                 </div>

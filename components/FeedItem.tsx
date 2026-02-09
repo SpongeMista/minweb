@@ -398,7 +398,7 @@ export default function FeedItem({
               </svg>
             </span>
             <span className="flex-1">{isBookmarksList ? 'Remove bookmark' : 'Bookmark'}</span>
-            <span className="ml-2 inline-flex min-w-[28px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
+            <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
               B
             </span>
           </DropdownMenuItem>
@@ -460,7 +460,7 @@ export default function FeedItem({
             </span>
             <span className="flex-1">Delete</span>
             <span className="ml-2 inline-flex min-w-[32px] justify-center rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500">
-              Del
+              D
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -469,7 +469,7 @@ export default function FeedItem({
   )
 
   const bookmarkBadge = isBookmarked ? (
-    <span className="absolute right-12 top-[-10px] z-10 inline-flex h-8 w-8 items-center justify-center text-[#FF2D55]">
+    <span className="absolute right-12 top-[-10px] z-10 inline-flex h-8 w-8 items-center justify-center text-gray-400">
       <svg
         viewBox="0 0 24 24"
         fill="currentColor"

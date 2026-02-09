@@ -111,14 +111,32 @@ export class RedditConnector extends BaseConnector {
         url.searchParams.set('after', after)
       }
 
-      const response = await fetch(url.toString(), {
-        headers: {
-          'User-Agent': process.env.REDDIT_USER_AGENT || 'feed-app/1.0 (public)',
-        },
-      })
+      const userAgent =
+        process.env.REDDIT_USER_AGENT ||
+        'Mozilla/5.0 (compatible; feed-app/1.0; +https://example.com)'
+      const baseUrls = ['https://www.reddit.com', 'https://old.reddit.com']
+      let response: Response | null = null
+      let lastStatus: number | null = null
+      for (const baseUrl of baseUrls) {
+        const candidate = new URL(url.toString())
+        candidate.host = new URL(baseUrl).host
+        response = await fetch(candidate.toString(), {
+          headers: {
+            'User-Agent': userAgent,
+            Accept: 'application/json',
+          },
+        })
+        if (response.ok) {
+          break
+        }
+        lastStatus = response.status
+        if (response.status !== 403 && response.status !== 429) {
+          break
+        }
+      }
 
-      if (!response.ok) {
-        throw new Error(`Reddit response ${response.status}`)
+      if (!response || !response.ok) {
+        throw new Error(`Reddit response ${lastStatus ?? response?.status ?? 'unknown'}`)
       }
 
       const payload = await response.json()

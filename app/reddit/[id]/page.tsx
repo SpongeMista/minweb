@@ -6,7 +6,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
-import NotesPanel from '@/components/NotesPanel'
+import DetailPageLayout from '@/components/DetailPageLayout'
+import { useNotesDrawer } from '@/components/NotesDrawerContext'
+import { useHighlights } from '@/lib/useHighlights'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -106,6 +108,22 @@ export default function RedditPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const contentRef = useRef<HTMLDivElement | null>(null)
+  const notesDrawer = useNotesDrawer()
+  const setFeedItemId = notesDrawer?.setFeedItemId
+  const { applyNow } = useHighlights(item?.id ?? null, contentRef)
+
+  useEffect(() => {
+    if (item?.id) applyNow()
+  }, [item?.id, applyNow])
+
+  useEffect(() => {
+    if (item?.id && setFeedItemId) {
+      setFeedItemId(item.id)
+    }
+    return () => {
+      setFeedItemId?.(null)
+    }
+  }, [item?.id, setFeedItemId])
 
   const postText = useMemo(() => {
     const rawText = item?.rawPayload?.selftext?.trim() || item?.excerpt?.trim() || ''
@@ -323,10 +341,10 @@ export default function RedditPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F5F5F5]">
-        <main className="max-w-[1064px] mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
-            <div className="w-full max-w-[720px] mx-auto lg:mx-0">
+      <DetailPageLayout>
+        <div className="min-h-screen bg-[#F5F5F5]">
+          <main className="max-w-[720px] mx-auto px-4 py-8">
+            <div className="w-full">
               <div className="flex items-center gap-3 mb-4">
                 <div className="h-9 w-9 rounded-full bg-gray-100" />
                 <div>
@@ -343,96 +361,61 @@ export default function RedditPage() {
                 </div>
               </div>
             </div>
-            <aside className="w-full max-w-[720px] mx-auto lg:max-w-none lg:mx-0 lg:sticky lg:top-16 h-fit">
-              <div className="bg-white rounded-[8px] p-5 shadow-sm border border-gray-100">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="h-5 w-20 bg-gray-100 rounded" />
-                  <div className="h-4 w-12 bg-gray-100 rounded" />
-                </div>
-                <div className="h-10 w-full bg-gray-100 rounded-[8px] mb-4" />
-                <div className="space-y-3">
-                  <div className="h-4 w-full bg-gray-100 rounded" />
-                  <div className="h-4 w-5/6 bg-gray-100 rounded" />
-                  <div className="h-4 w-4/6 bg-gray-100 rounded" />
-                </div>
-              </div>
-            </aside>
-          </div>
-        </main>
-      </div>
+          </main>
+        </div>
+      </DetailPageLayout>
     )
   }
 
   if (hasError || !item || !redditUrl) {
     return (
-      <div className="min-h-screen bg-[#F5F5F5]">
-        <main className="max-w-[648px] mx-auto px-4 py-8">
-          <div className="flex items-center gap-3 mb-4">
-            <Link
-              href={backHref}
-              aria-label={backLabel}
-              className="text-gray-600 hover:text-black transition-colors"
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                aria-hidden="true"
+      <DetailPageLayout>
+        <div className="min-h-screen bg-[#F5F5F5]">
+          <main className="max-w-[648px] mx-auto px-4 py-8">
+            <div className="flex items-center gap-3 mb-4">
+              <Link
+                href={backHref}
+                aria-label={backLabel}
+                className="text-gray-600 hover:text-black transition-colors"
               >
-                <path
-                  d="M15 18L9 12L15 6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </Link>
-            <h1 className="text-2xl font-semibold text-black">Reddit</h1>
-          </div>
-          <div className="bg-white rounded-[8px] p-5">
-            <p className="text-sm text-gray-600">
-              This post could not be loaded. It may have been removed or the link is invalid.
-            </p>
-          </div>
-        </main>
-      </div>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M15 18L9 12L15 6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </Link>
+              <h1 className="text-2xl font-semibold text-black">Reddit</h1>
+            </div>
+            <div className="bg-white rounded-[8px] p-5">
+              <p className="text-sm text-gray-600">
+                This post could not be loaded. It may have been removed or the link is invalid.
+              </p>
+            </div>
+          </main>
+        </div>
+      </DetailPageLayout>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5F5]">
-      <main className="max-w-[1064px] mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
-          <div className="w-full max-w-[720px] mx-auto lg:mx-0">
+    <DetailPageLayout>
+      <div className="min-h-screen bg-[#F5F5F5]">
+        <main className="max-w-[720px] mx-auto px-4 py-8">
+          <div className="w-full">
             <div className="flex items-start justify-between gap-3 mb-4">
-              <div className="flex items-start gap-3">
-                <Link
-                  href={backHref}
-                  aria-label={backLabel}
-                  className="text-gray-600 hover:text-black transition-colors pt-1"
-                >
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M15 18L9 12L15 6"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </Link>
-                <div>
-                  <h1 className="text-2xl font-semibold text-black">{item.title}</h1>
+              <div>
+                <h1 className="text-2xl font-semibold text-black">{item.title}</h1>
                   <div className="text-sm text-gray-600 mt-2 flex flex-wrap items-center gap-2">
                     {item.rawPayload?.subreddit && (
                       <span className="text-gray-700">r/{item.rawPayload.subreddit}</span>
@@ -447,7 +430,6 @@ export default function RedditPage() {
                     <span>{new Date(item.publishedAt).toLocaleString()}</span>
                   </div>
                 </div>
-              </div>
               <div className="flex items-center gap-2 pt-1">
                 {redditUrl && (
                   <a
@@ -671,10 +653,6 @@ export default function RedditPage() {
                 </a>
               )}
             </article>
-          </div>
-          <aside className="w-full max-w-[720px] mx-auto lg:max-w-none lg:mx-0 lg:sticky lg:top-16 h-fit">
-            <NotesPanel feedItemId={item.id} />
-          </aside>
         </div>
       </main>
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
@@ -693,6 +671,7 @@ export default function RedditPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </div>
+    </DetailPageLayout>
   )
 }

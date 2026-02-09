@@ -11,19 +11,40 @@ export async function GET(request: NextRequest) {
       query: request.nextUrl.searchParams.get('query') || '',
     })
 
-    const url = new URL('https://www.reddit.com/subreddits/search.json')
-    url.searchParams.set('q', parsed.query)
-    url.searchParams.set('limit', '10')
-    url.searchParams.set('raw_json', '1')
-
-    const response = await fetch(url.toString(), {
-      headers: {
-        'User-Agent': process.env.REDDIT_USER_AGENT || 'feed-app/1.0 (public)',
-      },
+    const searchParams = new URLSearchParams({
+      q: parsed.query,
+      limit: '10',
+      raw_json: '1',
     })
+    const userAgent =
+      process.env.REDDIT_USER_AGENT ||
+      'Mozilla/5.0 (compatible; feed-app/1.0; +https://example.com)'
+    const baseUrls = ['https://www.reddit.com', 'https://old.reddit.com']
+    let response: Response | null = null
+    let lastStatus: number | null = null
+    for (const baseUrl of baseUrls) {
+      const url = new URL('/subreddits/search.json', baseUrl)
+      url.search = searchParams.toString()
+      response = await fetch(url.toString(), {
+        headers: {
+          'User-Agent': userAgent,
+          Accept: 'application/json',
+        },
+      })
+      if (response.ok) {
+        break
+      }
+      lastStatus = response.status
+      if (response.status !== 403 && response.status !== 429) {
+        break
+      }
+    }
 
-    if (!response.ok) {
-      return NextResponse.json({ error: 'Reddit search failed' }, { status: response.status })
+    if (!response || !response.ok) {
+      return NextResponse.json(
+        { error: 'Reddit search failed' },
+        { status: lastStatus ?? response?.status ?? 500 }
+      )
     }
 
     let payload: any = null

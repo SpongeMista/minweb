@@ -31,6 +31,7 @@ model User {
   settings           UserSettings?
   emailSenders       EmailSender[]
   feedItemNotes      FeedItemNote[]
+  highlights         Highlight[]
 }
 
 model Account {
@@ -163,6 +164,7 @@ model FeedItem {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookmarks UserBookmark[]
   notes     FeedItemNote[]
+  highlights Highlight[]
 
   @@unique([userId, source, sourceId])
   @@index([userId, publishedAt])
@@ -173,12 +175,33 @@ model FeedItemNote {
   id         String   @id @default(cuid())
   userId     String
   feedItemId String
+  highlightId String? @unique
   body       String   @db.Text
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   feedItem FeedItem @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+  highlight Highlight? @relation("HighlightNote", fields: [highlightId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([feedItemId])
+  @@index([userId, feedItemId])
+}
+
+model Highlight {
+  id         String   @id @default(cuid())
+  userId     String
+  feedItemId String
+  startOffset Int
+  endOffset   Int
+  text       String   @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedItem FeedItem @relation(fields: [feedItemId], references: [id], onDelete: Cascade)
+  note     FeedItemNote? @relation("HighlightNote")
 
   @@index([userId])
   @@index([feedItemId])

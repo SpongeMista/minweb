@@ -106,6 +106,14 @@ export default function BookmarksPage() {
       if (isEditableTarget(event.target)) return
       if (items.length === 0) return
 
+      if (event.key.toLowerCase() === 'b') {
+        if (activeItemId) {
+          window.dispatchEvent(
+            new CustomEvent('feed-item-bookmark', { detail: { id: activeItemId } })
+          )
+        }
+      }
+
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
         const currentIndex = items.findIndex((item: any) => item.id === activeItemId)
@@ -138,10 +146,7 @@ export default function BookmarksPage() {
         return
       }
 
-      if (
-        (event.key === 'Delete' || event.key === 'Backspace') &&
-        activeItemId
-      ) {
+      if (event.key.toLowerCase() === 'd' && activeItemId) {
         event.preventDefault()
         setPendingDeleteId(activeItemId)
         setConfirmDeleteOpen(true)
